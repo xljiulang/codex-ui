@@ -29,6 +29,7 @@ import { flushPromises } from "@vue/test-utils";
 import { reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TabIcon, TabKind } from "../../lib/tabs";
+import { emptyHistoryState } from "../../lib/historyWindow";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -225,6 +226,53 @@ describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
       turnId: "turn-1",
       source: "error",
     });
+  });
+
+  it("历史窗口的实时命令输出同步写回明细源", async () => {
+    const tab = reactive(
+      makeSessionTab("s1", "t1", {
+        currentTurnId: "turn-1",
+        history: {
+          ...emptyHistoryState(),
+          loaded: true,
+          turns: [
+            {
+              id: "turn-1",
+              startedAtMs: 1,
+              summaryItems: [],
+              detailItems: [],
+              detailCursor: null,
+              detailHasMore: false,
+              detailLoaded: true,
+              detailLoading: false,
+              detailError: null,
+            },
+          ],
+        },
+      }),
+    );
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("item/started", {
+      threadId: "t1",
+      turnId: "turn-1",
+      item: {
+        id: "c1",
+        type: "commandExecution",
+        command: "echo hi",
+        status: "in_progress",
+        aggregatedOutput: "",
+      },
+    });
+    fireListen("item/commandExecution/outputDelta", {
+      threadId: "t1",
+      itemId: "c1",
+      delta: "hello",
+    });
+
+    expect(
+      tab.history?.turns[0].detailItems.find((item) => item.id === "c1"),
+    ).toMatchObject({ aggregatedOutput: "hello" });
   });
 
   it("非 error 条目不发通知", async () => {

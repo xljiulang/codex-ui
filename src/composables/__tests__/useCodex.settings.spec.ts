@@ -13,6 +13,7 @@ import {
   activeSessionTab,
 } from "../useCodex/sessionState";
 import { activeTabId } from "../useEditorTabs";
+import { emptyHistoryState } from "../../lib/historyWindow";
 import {
   makeSessionTab,
   PLUGINS_RESPONSE,
@@ -231,6 +232,23 @@ describe("resetToNewSession 会话级缓存复位", () => {
         skills: [{ name: "s1", key: "s1", path: "", desc: "", shortDesc: "" }],
         loaded: true,
       },
+      history: {
+        ...emptyHistoryState(),
+        loaded: true,
+        turns: [
+          {
+            id: "turn-1",
+            startedAtMs: 1,
+            summaryItems: [],
+            detailItems: [],
+            detailCursor: null,
+            detailHasMore: false,
+            detailLoaded: true,
+            detailLoading: false,
+            detailError: null,
+          },
+        ],
+      },
     });
     tabs.push(tab);
     activeTabId.value = "s1";
@@ -239,6 +257,7 @@ describe("resetToNewSession 会话级缓存复位", () => {
 
     expect(tab.plugins).toEqual({ plugins: [], loaded: false });
     expect(tab.skills).toEqual({ skills: [], loaded: false });
+    expect(tab.history).toEqual(emptyHistoryState());
   });
 });
 describe("loadSettings 默认权限初始值", () => {

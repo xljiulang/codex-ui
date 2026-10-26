@@ -207,6 +207,22 @@ describe("ToolCard 实时耗时", () => {
     expect(text).not.toContain("line-0");
   });
 
+  it("历史入库已截断时即使只剩少量行也继续显示截断提示", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "completed",
+          durationMs: 100,
+          aggregatedOutput: "tail-only",
+          _historyOutputTruncated: true,
+        }),
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+
+    expect(wrapper.find(".tool-output-cap").text()).toContain("5000");
+  });
+
   it("复制命令按钮写入剪贴板并反馈", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

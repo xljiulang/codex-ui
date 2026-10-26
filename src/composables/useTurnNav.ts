@@ -68,7 +68,7 @@ export interface TurnNavDeps {
 export function useTurnNav(deps: TurnNavDeps) {
   const anchorCount = ref(0);
   const currentIndex = ref(-1);
-  const turnNavReady = ref(false);
+  const turnNavReady = ref(true);
   const turnNavOpen = ref(false);
   const highlightTimer = ref<number | undefined>(undefined);
   let navHoverCloseTimer: number | undefined;
@@ -100,9 +100,7 @@ export function useTurnNav(deps: TurnNavDeps) {
   let jumpGuardEl: HTMLElement | null = null;
 
   // ≥2 个回合才提供导航（单回合无跳转意义，按钮不显示）
-  const hasTurnNav = computed(
-    () => anchorCount.value >= 2 && turnNavReady.value,
-  );
+  const hasTurnNav = computed(() => turnEntries.value.length >= 2);
 
   /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
   const turnEntries = computed(() => {
@@ -767,7 +765,6 @@ export function useTurnNav(deps: TurnNavDeps) {
       resizeObserver.observe(deps.scroller.value);
     }
     scheduleAnchorSync();
-    queueBackgroundWarm();
   }
 
   function dispose() {

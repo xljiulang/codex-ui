@@ -5,6 +5,7 @@ import type {
   PermissionId,
   UserInput,
 } from "../../lib/types";
+import type { SessionHistoryState } from "../../lib/historyWindow";
 import { TabIcon, TabKind, type EditorTabBase } from "../../lib/tabs";
 
 export const defaultSettings = (): AppSettings => ({
@@ -184,6 +185,8 @@ export interface SessionTab extends EditorTabBase {
   newSessionWorkspace: string | null;
   /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
   interactions: PendingInteraction[];
+  /** 大会话轻量摘要骨架与按需明细窗口；新会话/旧测试可暂缺省 */
+  history?: SessionHistoryState;
 }
 
 /** @ 菜单中展示的插件条目（plugin/list 归一化结果） */

@@ -174,10 +174,14 @@ const output = computed(() =>
 );
 // 渲染输入截断为最后 5000 行，避免超长输出流式期间 O(n^2)；状态里仍保留完整输出
 const OUTPUT_LINE_CAP = 5000;
-const { ref: cappedOutput, truncated: outputTruncated } = useTailWindow(
+const { ref: cappedOutput, truncated: tailOutputTruncated } = useTailWindow(
   output,
   OUTPUT_LINE_CAP,
   () => props.item,
+);
+const outputTruncated = computed(
+  () =>
+    tailOutputTruncated.value || props.item._historyOutputTruncated === true,
 );
 const hasOutput = computed(() => cappedOutput.value.trim().length > 0);
 const { ref: shownOutput, flush: flushOutput } = useThrottledRef(

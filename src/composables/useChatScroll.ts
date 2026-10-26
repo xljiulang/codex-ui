@@ -98,6 +98,10 @@ export function useChatScroll(
 
   function jumpToBottom() {
     stickToBottom.value = true;
+    if (scroller.value) {
+      scroller.value.scrollTop = scroller.value.scrollHeight;
+      lastStickScrollTop = scroller.value.scrollTop;
+    }
     scheduleScroll();
     deps.scheduleAnchorSync();
   }
@@ -111,27 +115,25 @@ export function useChatScroll(
   }
 
   /**
-   * 历史会话整批加载/切回后强制滚到最新：`.msg` 使用 content-visibility（未渲染时按
-   * 80px 估算高度），直接 scrollTop=scrollHeight 会落在估算底部、高于真实底部，且
-   * content-visibility 的布局变化不触发 MutationObserver。给 scroller 临时加 measuring
-   * 类一次性真实渲染全部消息（contain-intrinsic-size: auto 会记住真实高度），
-   * 测量后滚到底部再移除类，随后复用双 rAF 吸底兜底。
+   * 历史窗口落地后滚到最新。大会话只渲染摘要骨架与有限明细，直接按两帧后的
+   * scrollHeight 落底即可；不再用 measuring 强制整个历史真实布局。
    */
   async function settleToBottom() {
     const el = scroller.value;
     if (!el) return;
     stickToBottom.value = true;
     settleRunning = true;
-    el.classList.add("measuring");
     try {
       await nextTick();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
       el.scrollTop = el.scrollHeight;
       lastStickScrollTop = el.scrollTop;
     } finally {
-      el.classList.remove("measuring");
       settleRunning = false;
     }
     scheduleScroll();

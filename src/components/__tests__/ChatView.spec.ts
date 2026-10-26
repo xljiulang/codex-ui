@@ -6,6 +6,13 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+const historyMocks = vi.hoisted(() => ({
+  loadHistoryDetailForUserMessage: vi.fn(),
+  loadOlderHistoryPage: vi.fn(),
+}));
+
+vi.mock("../../composables/useCodex/history", () => historyMocks);
+
 vi.mock("../../composables/useCodex", () => {
   const store = reactive({
     turnActive: false,
@@ -50,6 +57,10 @@ vi.mock("../../composables/useCodex", () => {
 import ChatView from "../ChatView.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { respondInteraction, store } from "../../composables/useCodex";
+import {
+  createHistoryTurnStates,
+  composeHistoryItems,
+} from "../../lib/historyWindow";
 import type { ThreadItem } from "../../lib/types";
 import type { SessionTab } from "../../composables/useCodex";
 
@@ -860,6 +871,458 @@ describe("ChatView 日期分隔线", () => {
   });
 });
 
+describe("ChatView 大会话历史窗口", () => {
+  beforeEach(() => {
+    store.interactions.splice(0);
+    tab = reactive(makeTab());
+    historyMocks.loadHistoryDetailForUserMessage.mockReset();
+    historyMocks.loadOlderHistoryPage.mockReset();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return undefined;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  });
+
+  it("未展开回合边界可见，滚入 400px 时自动补载一次", async () => {
+    tab.history = {
+      loaded: true,
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      turns: createHistoryTurnStates([
+        {
+          id: "turn-3",
+          status: "completed",
+          items: [
+            {
+              id: "u3",
+              type: "userMessage",
+              content: [{ type: "text", text: "三", text_elements: [] }],
+            },
+          ],
+        },
+        {
+          id: "turn-2",
+          status: "completed",
+          items: [
+            {
+              id: "u2",
+              type: "userMessage",
+              content: [{ type: "text", text: "二", text_elements: [] }],
+            },
+          ],
+        },
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              id: "u1",
+              type: "userMessage",
+              content: [{ type: "text", text: "一", text_elements: [] }],
+            },
+          ],
+        },
+      ]).map((turn) =>
+        turn.id === "turn-2" || turn.id === "turn-3"
+          ? { ...turn, detailLoaded: true }
+          : turn,
+      ),
+    };
+    store.itemsByThread["t1"] = composeHistoryItems(tab.history.turns);
+    let scrollHeight = 1000;
+    historyMocks.loadOlderHistoryPage.mockImplementation(async () => {
+      scrollHeight = 1300;
+      return true;
+    });
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: {
+            props: ["item"],
+            template: "<div class='msg-stub'>{{ item.id }}</div>",
+          },
+          EmptyState: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    const boundary = wrapper.find("[data-history-boundary]");
+    expect(boundary.exists()).toBe(true);
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    store.itemsRev++;
+    await nextTick();
+    scroller.scrollTop = 100;
+    Object.defineProperty(boundary.element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 300,
+        bottom: 320,
+        height: 20,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 300,
+        toJSON() {},
+      }),
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 0,
+        bottom: 600,
+        height: 600,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }),
+    });
+
+    const parked = new Event("scroll");
+    Object.defineProperty(parked, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(parked);
+    await flushPromises();
+
+    expect(historyMocks.loadOlderHistoryPage).toHaveBeenCalledTimes(1);
+    expect(historyMocks.loadOlderHistoryPage).toHaveBeenCalledWith(tab, "t1");
+    expect(scroller.scrollTop).toBe(400);
+  });
+
+  it("明细边界已滚到视口上方时不再自动补载", async () => {
+    tab.history = {
+      loaded: true,
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      turns: createHistoryTurnStates([
+        {
+          id: "turn-2",
+          status: "completed",
+          items: [
+            {
+              id: "u2",
+              type: "userMessage",
+              content: [{ type: "text", text: "二", text_elements: [] }],
+            },
+          ],
+        },
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              id: "u1",
+              type: "userMessage",
+              content: [{ type: "text", text: "一", text_elements: [] }],
+            },
+          ],
+        },
+      ]).map((turn) =>
+        turn.id === "turn-1" ? { ...turn, detailLoaded: true } : turn,
+      ),
+    };
+    store.itemsByThread["t1"] = composeHistoryItems(tab.history.turns);
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    const boundary = wrapper.find("[data-history-boundary]");
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick();
+    Object.defineProperty(boundary.element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: -100,
+        bottom: -80,
+        height: 20,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: -100,
+        toJSON() {},
+      }),
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 0,
+        bottom: 600,
+        height: 600,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }),
+    });
+
+    scroller.scrollTop = 100;
+    const parked = new Event("scroll");
+    Object.defineProperty(parked, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(parked);
+    await flushPromises();
+
+    expect(historyMocks.loadOlderHistoryPage).not.toHaveBeenCalled();
+  });
+
+  it("补载途中点击回到底部，完成后仍停留在新底部", async () => {
+    tab.history = {
+      loaded: true,
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      turns: createHistoryTurnStates([
+        {
+          id: "turn-2",
+          status: "completed",
+          items: [
+            {
+              id: "u2",
+              type: "userMessage",
+              content: [{ type: "text", text: "二", text_elements: [] }],
+            },
+          ],
+        },
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              id: "u1",
+              type: "userMessage",
+              content: [{ type: "text", text: "一", text_elements: [] }],
+            },
+          ],
+        },
+      ]).map((turn) =>
+        turn.id === "turn-1" ? { ...turn, detailLoaded: true } : turn,
+      ),
+    };
+    store.itemsByThread["t1"] = composeHistoryItems(tab.history.turns);
+    let finishLoad: ((loaded: boolean) => void) | undefined;
+    historyMocks.loadOlderHistoryPage.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishLoad = resolve;
+        }),
+    );
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    const boundary = wrapper.find("[data-history-boundary]");
+    let scrollHeight = 1000;
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    store.itemsRev++;
+    await nextTick();
+    Object.defineProperty(boundary.element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 100,
+        bottom: 120,
+        height: 20,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 100,
+        toJSON() {},
+      }),
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 0,
+        bottom: 600,
+        height: 600,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }),
+    });
+    scroller.scrollTop = 1000;
+    const pinned = new Event("scroll");
+    Object.defineProperty(pinned, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(pinned);
+    await flushPromises();
+    expect(historyMocks.loadOlderHistoryPage).not.toHaveBeenCalled();
+
+    scroller.scrollTop = 100;
+    const parked = new Event("scroll");
+    Object.defineProperty(parked, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(parked);
+    await nextTick();
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(true);
+    expect(historyMocks.loadOlderHistoryPage).toHaveBeenCalledTimes(1);
+
+    await wrapper.find(".scroll-bottom-btn").trigger("click");
+    scrollHeight = 1300;
+    finishLoad?.(true);
+    await flushPromises();
+    await nextTick();
+
+    expect(scroller.scrollTop).toBe(1300);
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(false);
+  });
+
+  it("历史加载落到底部不再给整个消息流加 measuring", async () => {
+    store.itemsByThread["t1"] = reactive([
+      { id: "u1", type: "userMessage", content: [] },
+      { id: "a1", type: "agentMessage", text: "ok" },
+    ]);
+    tab.loading = true;
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    const add = vi.spyOn(scroller.classList, "add");
+
+    tab.loading = false;
+    await nextTick();
+    await flushPromises();
+
+    expect(
+      add.mock.calls.filter(([token]) => token === "measuring"),
+    ).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("边界加载失败后滚动不自动重试，只保留手动重试入口", async () => {
+    tab.history = {
+      loaded: true,
+      loading: false,
+      loadingOlder: false,
+      error: null,
+      turns: createHistoryTurnStates([
+        {
+          id: "turn-2",
+          status: "completed",
+          items: [
+            {
+              id: "u2",
+              type: "userMessage",
+              content: [{ type: "text", text: "二", text_elements: [] }],
+            },
+          ],
+        },
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              id: "u1",
+              type: "userMessage",
+              content: [{ type: "text", text: "一", text_elements: [] }],
+            },
+          ],
+        },
+      ]).map((turn) =>
+        turn.id === "turn-1"
+          ? { ...turn, detailLoaded: true }
+          : { ...turn, detailError: "网络错误" },
+      ),
+    };
+    store.itemsByThread["t1"] = composeHistoryItems(tab.history.turns);
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    const boundary = wrapper.find("[data-history-boundary]");
+    Object.defineProperty(boundary.element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 100,
+        bottom: 120,
+        height: 20,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 100,
+        toJSON() {},
+      }),
+    });
+    Object.defineProperty(scroller, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 0,
+        bottom: 600,
+        height: 600,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }),
+    });
+
+    scroller.dispatchEvent(new Event("scroll"));
+    await flushPromises();
+
+    expect(historyMocks.loadOlderHistoryPage).not.toHaveBeenCalled();
+    expect(boundary.text()).toContain("重试");
+  });
+});
+
 describe("ChatView 计划已就绪气泡", () => {
   beforeEach(() => {
     tab.planPrompt = null;
@@ -1145,14 +1608,13 @@ describe("ChatView 回合定位按钮", () => {
     await nextTick();
   }
 
-  it("预热完成前隐藏，完成后 ≥2 个回合显示导航按钮；0/1 个不显示", async () => {
+  it("按摘要骨架即时显示导航：≥2 个回合显示，0/1 个不显示", async () => {
     store.itemsByThread["t1"] = reactive(userThread(1));
     const single = mountChat();
     await nextTick();
     await flushPromises();
     expect(single.find(".turn-nav").exists()).toBe(false);
-    await warmReady();
-    // 单回合无跳转意义，预热完成也不显示
+    // 单回合无跳转意义
     expect(single.find(".turn-nav").exists()).toBe(false);
     single.unmount();
 
@@ -1160,7 +1622,6 @@ describe("ChatView 回合定位按钮", () => {
     const empty = mountChat();
     await nextTick();
     await flushPromises();
-    await warmReady();
     expect(empty.find(".turn-nav").exists()).toBe(false);
     empty.unmount();
 
@@ -1168,11 +1629,30 @@ describe("ChatView 回合定位按钮", () => {
     const pair = mountChat();
     await nextTick();
     await flushPromises();
-    expect(pair.find(".turn-nav").exists()).toBe(false);
-    await warmReady();
     expect(pair.find(".turn-nav").exists()).toBe(true);
     expect(pair.findAll(".turn-nav-btn")).toHaveLength(1);
     pair.unmount();
+  });
+
+  it("点击旧回合导航后立即发起该回合的明细补载", async () => {
+    historyMocks.loadHistoryDetailForUserMessage.mockReset();
+    historyMocks.loadHistoryDetailForUserMessage.mockResolvedValue(false);
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await nextTick();
+    await flushPromises();
+    await installGeometry(wrapper, [100, 300, 500]);
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[0].trigger("click");
+    await flushPromises();
+
+    expect(historyMocks.loadHistoryDetailForUserMessage).toHaveBeenCalledWith(
+      tab,
+      "t1",
+      "u1",
+    );
+    wrapper.unmount();
   });
 
   it("悬停导航按钮展开卡片：条目正序、含文本预览、当前回合高亮", async () => {
@@ -1439,19 +1919,18 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
-  it("切换线程后重置并隐藏回合定位控件", async () => {
+  it("切换线程后按新线程摘要重建回合导航", async () => {
     store.itemsByThread["t1"] = reactive(userThread(2));
     const wrapper = mountChat();
-    await warmReady();
     expect(wrapper.find(".turn-nav").exists()).toBe(true);
 
     store.itemsByThread["t2"] = reactive(userThread(3));
     tab.threadId = "t2";
     await nextTick();
     await flushPromises();
-    expect(wrapper.find(".turn-nav").exists()).toBe(false);
-    await warmReady();
     expect(wrapper.find(".turn-nav").exists()).toBe(true);
+    await openNavCard(wrapper);
+    expect(wrapper.findAll(".turn-nav-item")).toHaveLength(3);
     wrapper.unmount();
   });
 
@@ -1740,42 +2219,6 @@ describe("ChatView 回合定位按钮", () => {
       "session_log",
       expect.objectContaining({ event: "chat-nav-anchor-fallback" }),
     );
-    wrapper.unmount();
-  });
-
-  it("预热超时（持续布局变化）不算稳定：按间隔重试，稳定后停止重试", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(3));
-    const wrapper = mountChat();
-    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
-    // 观察 measuring 类出现次数：每次预热尝试会加一次（批量附件计数便于断言重试）
-    let cycles = 0;
-    let inMeasuring = false;
-    const observer = new MutationObserver(() => {
-      const on = scroller.classList.contains("measuring");
-      if (on && !inMeasuring) cycles++;
-      inMeasuring = on;
-    });
-    observer.observe(scroller, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    // 持续 DOM 变更：8s 上限前无法进入 120ms 安静期 → 本次预热判为「未稳定」
-    for (let i = 0; i < 85; i++) {
-      scroller.appendChild(document.createElement("div"));
-      await vi.advanceTimersByTimeAsync(100);
-    }
-    await nextTick();
-    // 按钮可见时机保持现状：首次预热尝试结束即显示
-    expect(wrapper.find(".turn-nav").exists()).toBe(true);
-    expect(cycles).toBe(1);
-
-    // 停止变更：1s 后重试并达到稳定 → 不再重试
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(cycles).toBe(2);
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(cycles).toBe(2);
-    observer.disconnect();
     wrapper.unmount();
   });
 });

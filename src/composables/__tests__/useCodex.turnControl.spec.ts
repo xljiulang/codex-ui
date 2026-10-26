@@ -258,7 +258,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(activeSessionTab()?.goalStatus).toBeNull();
   });
 
-  it("openSessionTabForThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
+  it("openSessionTabForThread：summary 建骨架并为最新回合拉一页明细", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -266,10 +266,56 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
         });
       }
       if (cmd === "codex_rpc") {
-        const method = (args as { params?: { method?: string } })?.params
-          ?.method;
+        const { method, params } = args as {
+          method: string;
+          params: Record<string, unknown>;
+        };
         if (method === "thread/turns/list") {
-          return Promise.resolve({ data: [], nextCursor: null });
+          return Promise.resolve({
+            data: [
+              {
+                id: "turn-1",
+                status: "completed",
+                items: [
+                  {
+                    id: "u1",
+                    type: "userMessage",
+                    content: [{ type: "text", text: "hi", text_elements: [] }],
+                  },
+                  { id: "a1", type: "agentMessage", text: "hello" },
+                ],
+              },
+            ],
+            nextCursor: null,
+          });
+        }
+        if (method === "thread/items/list") {
+          return Promise.resolve({
+            data: [
+              {
+                turnId: params.turnId,
+                item: { id: "a1", type: "agentMessage", text: "hello" },
+              },
+              {
+                turnId: params.turnId,
+                item: {
+                  id: "c1",
+                  type: "commandExecution",
+                  command: "dir",
+                  status: "completed",
+                },
+              },
+              {
+                turnId: params.turnId,
+                item: {
+                  id: "u1",
+                  type: "userMessage",
+                  content: [{ type: "text", text: "hi", text_elements: [] }],
+                },
+              },
+            ],
+            nextCursor: null,
+          });
         }
       }
       if (cmd === "goal_get") return Promise.resolve({});
@@ -283,11 +329,26 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
         threadId: "t2",
         cursor: null,
         limit: 50,
-        // 协议 SortDirection 为 "asc" | "desc"（旧值 "ascending" 会被服务端拒绝）
-        sortDirection: "asc",
-        itemsView: "full",
+        sortDirection: "desc",
+        itemsView: "summary",
       },
     });
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/items/list",
+      params: {
+        threadId: "t2",
+        turnId: "turn-1",
+        cursor: null,
+        limit: 100,
+        sortDirection: "desc",
+        itemView: "full",
+      },
+    });
+    expect(store.itemsByThread.t2.map((item) => item.id)).toEqual([
+      "u1",
+      "c1",
+      "a1",
+    ]);
   });
 
   it("openSessionTabForThread：分页线程以 includeTurns=false 读元数据，消息来自 turns/list", async () => {

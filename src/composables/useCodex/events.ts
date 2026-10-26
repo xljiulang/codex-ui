@@ -35,6 +35,7 @@ import {
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
+import { mirrorHistoryItem } from "./history";
 import {
   interactionKindForMethod,
   notifySessionCompleted,
@@ -54,6 +55,16 @@ import {
 } from "./types";
 
 let unlisteners: UnlistenFn[] = [];
+
+function mirrorOpenHistoryItem(
+  threadId: string,
+  item: ThreadItem,
+  turnId?: string | null,
+): void {
+  const tab = findSessionTabByThread(threadId);
+  const targetTurn = turnId ?? tab?.currentTurnId;
+  if (tab && targetTurn) mirrorHistoryItem(tab, targetTurn, item);
+}
 let wired = false;
 
 /** 任一标签（会话回合/目标续跑、终端命令执行）在工作时，任务栏显示不确定进度条；
@@ -358,10 +369,12 @@ export async function wireEvents() {
       };
       if (isBackgroundThread(p.threadId)) return;
       notifyErrorItem(p.item, p.threadId, p.turnId);
-      upsertItem(p.threadId, {
+      const item = {
         ...p.item,
         startedAtMs: p.startedAtMs ?? Date.now(),
-      });
+      };
+      upsertItem(p.threadId, item);
+      mirrorOpenHistoryItem(p.threadId, item, p.turnId);
     }),
     await listen("item/completed", (e) => {
       const p = e.payload as {
@@ -387,12 +400,14 @@ export async function wireEvents() {
           durationMs = p.completedAtMs - started;
         }
       }
-      upsertItem(p.threadId, {
+      const item = {
         ...p.item,
         completedAtMs: p.completedAtMs,
         streaming: false,
         ...(durationMs !== undefined ? { durationMs } : {}),
-      });
+      };
+      upsertItem(p.threadId, item);
+      mirrorOpenHistoryItem(p.threadId, item, p.turnId);
     }),
   );
 
@@ -416,6 +431,7 @@ export async function wireEvents() {
         item.streaming = true;
         bumpActive(p.threadId, 1);
       }
+      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );
@@ -438,6 +454,7 @@ export async function wireEvents() {
       if (!isThreadItemType<CommandExecutionItem>(item, "commandExecution"))
         return;
       item.aggregatedOutput = (item.aggregatedOutput ?? "") + p.delta;
+      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );
@@ -472,6 +489,7 @@ export async function wireEvents() {
         content.push(p.delta);
       }
       item.content = content;
+      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );
@@ -484,13 +502,15 @@ export async function wireEvents() {
         changes?: { path: string; kind: string; diff?: string }[];
       };
       if (isBackgroundThread(p.threadId)) return;
-      upsertItem(p.threadId, {
+      const item: ThreadItem = {
         id: p.itemId,
         type: "fileChange",
         changes: p.changes ?? [],
         status: "inProgress",
         streaming: true,
-      });
+      };
+      upsertItem(p.threadId, item);
+      mirrorOpenHistoryItem(p.threadId, item);
     }),
   );
 

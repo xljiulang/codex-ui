@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import InlineInteraction from "./InlineInteraction.vue";
@@ -8,8 +15,13 @@ import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
 import { useChatScroll } from "../composables/useChatScroll";
+import {
+  loadHistoryDetailForUserMessage,
+  loadOlderHistoryPage,
+} from "../composables/useCodex/history";
 import { useTurnNav } from "../composables/useTurnNav";
 import { useWaitingChip } from "../composables/useWaitingChip";
+import { findNextOlderDetailTurnId } from "../lib/historyWindow";
 import { ICON_ARROW_DOWN, ICON_LINES_4 } from "../lib/icons";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
 
@@ -39,6 +51,28 @@ watch(
 );
 const turns = computed<Turn[]>(() => turnsBuilder.build(items.value));
 
+/** 连续明细窗口的上沿；其上的历史继续以摘要骨架显示。 */
+const historyBoundary = computed(() => {
+  const history = props.tab.history;
+  if (!history?.loaded || history.turns.length === 0) return null;
+  const turnId = findNextOlderDetailTurnId(history.turns);
+  const turn = history.turns.find((item) => item.id === turnId);
+  if (!turn) return null;
+  const userItem = turn.summaryItems.find(
+    (item) => item.type === "userMessage",
+  );
+  if (!userItem) return null;
+  return {
+    turnKey: `turn-${userItem.id}`,
+    beforeItemId:
+      turn.detailLoaded && turn.detailItems.length > 0
+        ? turn.detailItems[0].id
+        : userItem.id,
+    loading: history.loadingOlder || turn.detailLoading,
+    error: turn.detailError ?? history.error,
+  };
+});
+
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
@@ -57,7 +91,7 @@ const scroll = useChatScroll(scroller, {
   isNavAnimating: () => nav.isNavAnimating(),
   onTrustedScroll: (scrollTop) => nav.onTrustedScroll(scrollTop),
   scheduleAnchorSync: () => nav.scheduleAnchorSync(),
-  onSettled: () => nav.beginBackgroundWarm(),
+  onSettled: () => undefined,
 });
 // 导航浮层模板 ref（所有权在本组件模板，逻辑在 useTurnNav）
 const turnNavRoot = ref<HTMLElement | null>(null);
@@ -82,7 +116,6 @@ const {
   previewX,
   previewY,
   scheduleAnchorSync,
-  queueBackgroundWarm,
   resetTurnNav,
   resetWarmState,
   selectTurn,
@@ -106,6 +139,83 @@ const {
   dispose: disposeScroll,
 } = scroll;
 
+let boundaryCheckRaf: number | undefined;
+let suppressBoundaryCheck = false;
+let bottomRequestRev = 0;
+
+function suppressBoundaryCheckForScroll() {
+  suppressBoundaryCheck = true;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      suppressBoundaryCheck = false;
+    });
+  });
+}
+
+function requestBottom() {
+  bottomRequestRev++;
+  jumpToBottom();
+}
+
+async function loadOlderPreservingPosition() {
+  const el = scroller.value;
+  const threadId = props.tab.threadId;
+  if (!el || !threadId) return;
+  const requestRev = bottomRequestRev;
+  const distanceFromBottom = el.scrollHeight - el.scrollTop;
+  const loaded = await loadOlderHistoryPage(props.tab, threadId);
+  if (!loaded || !scroller.value) return;
+  await nextTick();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  suppressBoundaryCheckForScroll();
+  if (requestRev !== bottomRequestRev || stickToBottom.value) {
+    jumpToBottom();
+    return;
+  }
+  scroller.value.scrollTop = Math.max(
+    0,
+    scroller.value.scrollHeight - distanceFromBottom,
+  );
+  scheduleAnchorSync();
+}
+
+function scheduleHistoryBoundaryCheck() {
+  if (boundaryCheckRaf !== undefined) return;
+  boundaryCheckRaf = requestAnimationFrame(() => {
+    boundaryCheckRaf = undefined;
+    const el = scroller.value;
+    const boundary = historyBoundary.value;
+    if (!el || !boundary || !props.tab.threadId) return;
+    if (stickToBottom.value) return;
+    if (boundary.error) return;
+    if (props.tab.history?.loadingOlder) return;
+    const marker = el.querySelector<HTMLElement>("[data-history-boundary]");
+    if (!marker) return;
+    const top =
+      marker.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    if (top < 0 || top > 400) return;
+    void loadOlderPreservingPosition();
+  });
+}
+
+function onChatScroll(e: Event) {
+  onScroll(e);
+  if (suppressBoundaryCheck) return;
+  scheduleHistoryBoundaryCheck();
+}
+
+function selectHistoryTurn(entry: { id: string; index: number }) {
+  selectTurn(entry);
+  const threadId = props.tab.threadId;
+  if (threadId) {
+    void loadHistoryDetailForUserMessage(props.tab, threadId, entry.id);
+  }
+}
+
+function retryHistoryBoundary() {
+  void loadOlderPreservingPosition();
+}
+
 // ---------- 无障碍播报（回合开始/结束） ----------
 const liveAnnouncement = ref("");
 watch(
@@ -121,7 +231,7 @@ watch(
 watch(
   () => store.userSendRev,
   () => {
-    jumpToBottom();
+    requestBottom();
   },
 );
 
@@ -135,14 +245,6 @@ watch(
   () => {
     scheduleScroll();
     scheduleAnchorSync();
-  },
-);
-
-// 新会话消息出现/内容由空转非空时补后台预热（历史会话由 loading/thread watcher 触发）
-watch(
-  () => items.value.length,
-  () => {
-    if (items.value.length > 0) queueBackgroundWarm();
   },
 );
 
@@ -180,6 +282,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (boundaryCheckRaf !== undefined) cancelAnimationFrame(boundaryCheckRaf);
+  boundaryCheckRaf = undefined;
   disposeScroll();
   disposeNav();
 });
@@ -188,13 +292,31 @@ onBeforeUnmount(() => {
 <template>
   <div class="chat">
     <div class="chat-scroll-wrap">
-      <div ref="scroller" class="chat-scroll" @scroll="onScroll">
+      <div ref="scroller" class="chat-scroll" @scroll="onChatScroll">
         <div v-if="items.length === 0" class="chat-empty">
           <EmptyState :busy="tab.turnActive || tab.creatingSession" />
         </div>
         <template v-for="turn in turns" :key="turn.key">
           <section class="turn">
             <template v-for="row in turn.rows" :key="row.key">
+              <div
+                v-if="
+                  row.kind === 'msg' &&
+                  historyBoundary?.turnKey === turn.key &&
+                  historyBoundary.beforeItemId === row.item.id
+                "
+                class="history-boundary"
+                data-history-boundary
+              >
+                <span v-if="historyBoundary.loading"> 正在加载更早内容… </span>
+                <template v-else-if="historyBoundary.error">
+                  <span>更早内容加载失败</span>
+                  <button type="button" @click="retryHistoryBoundary">
+                    重试
+                  </button>
+                </template>
+                <span v-else>向上滚动加载更早内容</span>
+              </div>
               <div v-if="row.kind === 'sep'" class="date-sep">
                 {{ row.date }}
               </div>
@@ -244,7 +366,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="turn-nav-item"
                 :class="{ active: entry.index === currentIndex }"
-                @click="selectTurn(entry)"
+                @click="selectHistoryTurn(entry)"
                 @mouseenter="onTurnItemEnter($event, entry)"
                 @mouseleave="onTurnItemLeave()"
               >
@@ -274,7 +396,7 @@ onBeforeUnmount(() => {
         type="button"
         class="scroll-bottom-btn"
         aria-label="回到底部"
-        @click="jumpToBottom()"
+        @click="requestBottom()"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path :d="ICON_ARROW_DOWN" />
@@ -644,6 +766,25 @@ onBeforeUnmount(() => {
  * 估算高度导致的「滚不到最新」；测量后移除，contain-intrinsic-size: auto 记住真实高度 */
 .chat-scroll.measuring :deep(.msg) {
   content-visibility: visible;
+}
+
+/* 轻量摘要与完整明细的加载边界：向上滚入视口时自动补载更早明细。 */
+.history-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 28px;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.history-boundary button {
+  color: var(--blue);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
 }
 
 /* 日期分隔线 */

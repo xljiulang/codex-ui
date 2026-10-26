@@ -314,6 +314,30 @@ describe("flattenTurns 历史回合时间补齐", () => {
     });
     expect("derived" in out[1]).toBe(false);
   });
+
+  it("旧版全量回退同样截断历史命令输出", () => {
+    const source = Array.from({ length: 6000 }, (_, i) => `L${i}`).join("\n");
+    const turns = [
+      {
+        id: "t1",
+        status: "completed",
+        items: [
+          {
+            type: "commandExecution",
+            id: "c1",
+            command: "run",
+            status: "completed",
+            aggregatedOutput: source,
+          },
+        ],
+      },
+    ] as unknown as Turn[];
+
+    const out = flattenTurns(turns);
+
+    expect(String(out[0].aggregatedOutput).startsWith("L1000\n")).toBe(true);
+    expect(out[0]._historyOutputTruncated).toBe(true);
+  });
 });
 
 describe("upsertItem 用户消息派生摘要持久化", () => {

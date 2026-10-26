@@ -13,6 +13,7 @@ import { sessionLog } from "../../lib/sessionLog";
 import { TabKind } from "../../lib/tabs";
 import type {
   PendingInteraction,
+  ThreadItem,
   ThreadSummary,
   Turn,
   UserInput,
@@ -25,6 +26,7 @@ import {
   resolveSessionWorkspace,
   workspace,
 } from "./items";
+import { loadThreadHistory } from "./history";
 import {
   activeSessionTab,
   allSessionTabs,
@@ -388,24 +390,30 @@ async function loadThreadInto(
       };
     }>("thread_read", { threadId, includeTurns: false });
     const historyMode = res.thread.historyMode;
-    // 优先用全量 items（含命令/工具详情），失败时按 historyMode 分流回退
-    let fullItems = await loadFullItems(threadId);
+    // 大会话优先建立轻量摘要骨架，只加载最新两回合明细；旧版不支持时再全量回退。
+    let windowLoaded = await loadThreadHistory(tab, threadId);
+    let fullItems: ThreadItem[] | null = windowLoaded
+      ? (store.itemsByThread[threadId] ?? [])
+      : null;
     if (!fullItems) {
-      if (historyMode === "paginated") {
-        // 分页线程不支持 includeTurns=true，保持空列表打开（仍可继续发送消息）
-        fullItems = [];
-        setToast(
-          "该会话为分页存储，当前 Codex 版本无法读取历史，仍可继续发送消息",
-        );
-      } else {
-        try {
-          const legacy = await invoke<{ thread: { turns?: Turn[] } }>(
-            "thread_read",
-            { threadId, includeTurns: true },
-          );
-          fullItems = flattenTurns(legacy.thread.turns);
-        } catch {
+      fullItems = await loadFullItems(threadId);
+      if (!fullItems) {
+        if (historyMode === "paginated") {
+          // 分页线程不支持 includeTurns=true，保持空列表打开（仍可继续发送消息）
           fullItems = [];
+          setToast(
+            "该会话为分页存储，当前 Codex 版本无法读取历史，仍可继续发送消息",
+          );
+        } else {
+          try {
+            const legacy = await invoke<{ thread: { turns?: Turn[] } }>(
+              "thread_read",
+              { threadId, includeTurns: true },
+            );
+            fullItems = flattenTurns(legacy.thread.turns);
+          } catch {
+            fullItems = [];
+          }
         }
       }
     }

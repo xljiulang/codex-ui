@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem, Turn } from "../../lib/types";
 import { enrichUserMessage } from "../../lib/userMessage";
+import { capHistoryCommandOutput } from "../../lib/historyWindow";
 import { activeSessionTab } from "./sessionState";
 import { store } from "./store";
 import type { SessionTab } from "./types";
@@ -73,10 +74,11 @@ export function flattenTurns(turns?: Turn[]): ThreadItem[] {
     // （毫秒），使历史消息的 HH:mm 与日期分隔线复用实时渲染逻辑；已有时间不覆盖。
     const startedAtMs =
       typeof t.startedAt === "number" ? t.startedAt * 1000 : undefined;
-    for (const item of t.items ?? []) {
+    for (let item of t.items ?? []) {
       if (startedAtMs !== undefined && typeof item.startedAtMs !== "number") {
         item.startedAtMs = startedAtMs;
       }
+      item = capHistoryCommandOutput(item);
       // 历史加载同样补齐用户消息派生摘要，供回合导航直接消费
       if (item.type === "userMessage") enrichUserMessage(item);
       out.push(item);

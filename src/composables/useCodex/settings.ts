@@ -1,6 +1,7 @@
 // useCodex 拆分模块：设置/服务/模型/插件/技能（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
 import { PERMISSION_MODES } from "../../lib/permissions";
+import { emptyHistoryState } from "../../lib/historyWindow";
 import type { AppSettings, ServerStatus } from "../../lib/types";
 import { applyGlassEffect, applyTheme } from "../useTheme";
 import { activeSessionTab, sessionTabTitle } from "./sessionState";
@@ -30,6 +31,7 @@ export function resetToNewSession() {
   tab.goalArmed = false;
   tab.plugins = { plugins: [], loaded: false };
   tab.skills = { skills: [], loaded: false };
+  tab.history = emptyHistoryState();
   tab.planPrompt = null;
   tab.followupQueue = [];
   tab.title = sessionTabTitle(tab);

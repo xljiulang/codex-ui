@@ -1,5 +1,5 @@
 // useCodex 拆分模块：会话标签底层状态（原 useCodex.ts 的一部分，纯移动，行为不变）
-import { reactive, watch } from "vue";
+import { markRaw, reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
@@ -11,6 +11,7 @@ import { store } from "./store";
 import { setToast } from "./toast";
 import type { SessionTab } from "./types";
 import { sessionLog } from "../../lib/sessionLog";
+import { emptyHistoryState } from "../../lib/historyWindow";
 
 let sessionTabSeq = 0;
 
@@ -56,6 +57,7 @@ export function freshSessionTab(): SessionTab {
     creatingSession: false,
     newSessionWorkspace: null,
     interactions: [],
+    history: markRaw(emptyHistoryState()),
   } as SessionTab);
 }
 
