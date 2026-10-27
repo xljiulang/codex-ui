@@ -190,12 +190,10 @@ export interface AppSettings {
   compat_proxy_enabled?: boolean;
   /** 兼容代理监听端口（默认 18080） */
   compat_proxy_port?: number;
-  /** 兼容代理转发上游 API 请求地址（默认 https://opencode.ai/inference/openai/v1） */
+  /** 兼容代理转发上游 API 请求地址（默认空，必须填写后才能启动） */
   compat_proxy_base_url?: string;
   /** 兼容代理「回合收尾约束和助推」（空转收尾时自动续跑），默认开启 */
   compat_proxy_nudge_enabled?: boolean;
-  /** 兼容代理「OpenCode 客户端身份」（识别头、UA、TLS 指纹 + 免费层门禁补丁，不分上游），默认开启 */
-  compat_proxy_identity_enabled?: boolean;
   /** codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启 */
   error_notify_enabled?: boolean;
   /** 会话提权/交互/完成（审批、提问、MCP 表单、计划就绪、回合正常完成）发 Windows 系统通知，默认开启 */

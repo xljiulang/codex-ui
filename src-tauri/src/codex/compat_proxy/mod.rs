@@ -8,59 +8,30 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{OriginalUri, State};
-use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 #[cfg(test)]
 use axum::Json;
 use axum::Router;
 use futures_util::stream::{self, StreamExt};
 use futures_util::Stream;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tokio::task::AbortHandle;
 
 use crate::codex::compat_trace::{TraceCall, TraceSink};
-use crate::codex::opencode_profile::{tracing_headers, OPENCODE_CLIENT, OPENCODE_USER_AGENT};
 use crate::codex::session_log::SessionLog;
 
 /// 兼容代理默认端口（可在设置页修改）。
 pub(crate) const DEFAULT_COMPAT_PROXY_PORT: u16 = 18080;
-/// OpenCode Console 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
-///
-/// OpenCode 2.1.4 的实际 OpenAI 兼容 chat 路径是 `/inference/openai/v1`；
-/// 模型列表仍在相邻的 `/inference/v1/models`。
-/// 已保存的旧默认值不会自动改写，需在设置页手动修改。
-pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/inference/openai/v1";
-/// OpenCode 免费层的**请求体门禁**要求请求里出现这些工具名（opencode 客户端的内置工具）：
-/// 只在 `tools` 里补声明、不提供任何实现，模型真去调用时由 codex 侧以 `unsupported call`
-/// 裁决（代理不做特例过滤）。
-const ZEN_REQUIRED_TOOL_NAMES: [&str; 6] = ["bash", "edit", "glob", "grep", "read", "write"];
-/// 免费层门禁的合格工具条数下限：`tools` 里至少要有这么多个「名字在
-/// [`ZEN_REQUIRED_TOOL_NAMES`] 内、且 `parameters.properties` 非空对象」的声明，
-/// 否则上游以同一条 `403 FreeTierError` 拒绝（2026-10-15 实测：1~4 个一律 403、
-/// 5 个起放行；名字换成 task/todowrite 等其它内置名或 `foo1..foo6` 都不计数）。
-const ZEN_MIN_GATE_TOOLS: usize = 5;
-/// 上述假工具的描述：门禁不看描述，这段文案负责劝模型别真调用。
-const ZEN_FAKE_TOOL_DESCRIPTION: &str = "这是弃用的工具，请勿调用";
-/// 6 个内置工具的真实 `parameters` schema（逐字取自 opencode 客户端的真实请求报文）。
-///
-/// 为什么不能再用空 schema：门禁除了看名字，还要求 `parameters.properties` 是**非空对象**
-/// —— 空的 `{"type":"object","properties":{}}` 一律不计入 [`ZEN_MIN_GATE_TOOLS`]，
-/// 于是 6 个假工具全都不合格、请求必然 403（2026-10-15 实测）。schema 具体字段内容不参与
-/// 判定，但用真实报文最稳妥（上游若哪天校验更深一层也仍然一致）。
-const ZEN_TOOL_SCHEMAS_JSON: &str = include_str!("../../../resources/opencode_tools.json");
-/// 门禁要求的 `max_tokens`（与 `messages` 同级）：入站请求没有自己的输出预算时补上这个值。
-/// 与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受「OpenCode 客户端身份」开关约束：开关开启时对
-/// **所有上游**都补，关闭时一个字段都不补（见 [`ProxyState::opencode_identity`]）。
-const ZEN_MAX_TOKENS: u64 = 32_000;
-/// 请求上游时固定的 User-Agent（与 OpenCode 2.1.4 桌面客户端一致）。
-const ZEN_USER_AGENT: &str = OPENCODE_USER_AGENT;
+/// 通用兼容代理没有默认上游；新安装必须显式填写 base URL。
+pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "";
 /// 反向代理时不应转发的逐跳请求/响应头。
 const HOP_BY_HOP_HEADERS: [&str; 8] = [
     "connection",
@@ -369,7 +340,7 @@ fn request_is_plan_mode(req: &Value) -> bool {
 }
 
 /// 入站请求对应的 codex 线程 id：取请求头 `session-id`（codex 用它上报线程 id），
-/// 归一化见 [`normalize_client_session`]（与 [`SessionMap`] 用同一口径，登记表按原始线程 id 存）。
+/// 归一化见 [`normalize_client_session`]（登记表按原始线程 id 存）。
 /// 缺失、纯空白或非 ASCII 时返回 None（调用方退回关键词兜底判据）。
 fn request_header_thread_id(headers: &HeaderMap) -> Option<String> {
     normalize_client_session(headers.get("session-id")?.to_str().ok()?)
@@ -515,43 +486,32 @@ pub struct CompatProxyHandle {
     abort: AbortHandle,
 }
 
-/// 代理启动配置：端口、上游地址与两个行为开关。任一项变化都要重启代理，
+/// 代理启动配置：端口、上游地址与收尾助推开关。任一项变化都要重启代理，
 /// 因此整体作为 [`CompatProxyHandle`] 的比对基准。
 #[derive(Debug, Clone)]
 pub(crate) struct CompatProxyConfig {
     pub port: u16,
     /// 上游 base_url（已归一化：去空白与末尾 `/`）。
     pub base_url: String,
-    /// 「OpenCode 客户端身份」开关：勾选即**无条件**按 opencode 客户端发请求——
-    /// 识别头/UA 与免费层请求体门禁字段（`max_tokens` + 内置工具声明）一并生效，
-    /// 不再判断上游 host；取消勾选则两者一起停用。
-    pub opencode_identity: bool,
     /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
     pub nudge_enabled: bool,
 }
 
 impl CompatProxyConfig {
-    /// 归一化构造：base_url 去空白与末尾 `/`，空值回退默认上游。
-    pub(crate) fn new(
-        port: u16,
-        base_url: &str,
-        opencode_identity: bool,
-        nudge_enabled: bool,
-    ) -> Self {
+    /// 归一化构造：base_url 去空白与末尾 `/`。
+    pub(crate) fn new(port: u16, base_url: &str, nudge_enabled: bool) -> Self {
         Self {
             port,
             base_url: normalize_base_url(base_url),
-            opencode_identity,
             nudge_enabled,
         }
     }
 
     /// 是否与运行中的实例等价（用于「要不要重启代理」的判定）：端口、归一化后的上游地址
-    /// 与两个行为开关全部相同才算未变。
+    /// 与收尾助推开关全部相同才算未变。
     fn matches(&self, other: &Self) -> bool {
         self.port == other.port
             && self.base_url == other.base_url
-            && self.opencode_identity == other.opencode_identity
             && self.nudge_enabled == other.nudge_enabled
     }
 }
@@ -583,23 +543,18 @@ impl CompatProxyStatus {
     }
 }
 
-/// 归一化上游 base_url：去首尾空白、空值回退默认地址、去掉末尾所有 `/`。
+/// 归一化上游 base_url：去首尾空白并去掉末尾所有 `/`；空值保持为空。
 /// `https://a/` 与 `https://a`、`https://a/zen/v2/` 与 `https://a/zen/v2` 因此等价，
 /// 既影响翻译路由的派生，也影响「上游地址是否变化」的重启判定。
 fn normalize_base_url(base_url: &str) -> String {
-    let trimmed = base_url.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        DEFAULT_COMPAT_BASE_URL.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    base_url.trim().trim_end_matches('/').to_string()
 }
 
 /// 翻译入口路径 = 上游 base_url 的路径 + `/responses`（base_url 无路径时为 `/responses`）。
 /// codex 对 provider 的 base_url 追加 `/responses`，因此本地 provider 的路径需与提供方一致。
 fn responses_path(base_url: &str) -> String {
     let base = normalize_base_url(base_url);
-    let path = wreq::Url::parse(&base)
+    let path = reqwest::Url::parse(&base)
         .map(|url| url.path().trim_end_matches('/').to_string())
         .unwrap_or_default();
     format!("{path}/responses")
@@ -611,28 +566,19 @@ pub(crate) async fn start(
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
-    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
 ) -> Result<CompatProxyHandle, String> {
     let port = config.port;
     let base_url = config.base_url.clone();
+    if base_url.trim().is_empty() {
+        return Err("兼容代理未配置上游 base_url，无法启动".to_string());
+    }
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     log_at(
         &log,
         "info",
         "compat_proxy.transport",
         &[
-            ("transport", "wreq".to_string()),
-            (
-                "profile",
-                if config.opencode_identity {
-                    format!(
-                        "opencode-{}",
-                        crate::codex::opencode_profile::OPENCODE_VERSION
-                    )
-                } else {
-                    "plain".to_string()
-                },
-            ),
+            ("transport", "reqwest".to_string()),
             (
                 "proxy",
                 if proxy_env_configured() { "on" } else { "off" }.to_string(),
@@ -654,15 +600,11 @@ pub(crate) async fn start(
         }
     };
     let app = Router::new().fallback(handle_any).with_state(ProxyState {
-        session: opencode_id("ses", true),
-        session_map: Arc::new(SessionMap::default()),
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects,
         base_url: base_url.clone(),
+        client: reqwest::Client::new(),
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        opencode_identity: config.opencode_identity,
         nudge_enabled: config.nudge_enabled,
         protocols: protocol_cache(),
         modes,
@@ -694,8 +636,7 @@ fn proxy_env_configured() -> bool {
     })
 }
 
-/// 测试便捷入口：使用临时项目登记表启停代理。
-#[cfg(test)]
+/// 按需启停代理；端口、上游地址或行为开关变化时重启。
 pub(crate) async fn apply(
     handle: &mut Option<CompatProxyHandle>,
     enabled: bool,
@@ -704,30 +645,8 @@ pub(crate) async fn apply(
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
 ) -> CompatProxyStatus {
-    apply_with_projects(
-        handle,
-        enabled,
-        config,
-        log,
-        trace,
-        modes,
-        Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
-    )
-    .await
-}
-
-/// 与 [`apply`] 相同，但使用 app-server 维护的线程项目登记表。
-pub(crate) async fn apply_with_projects(
-    handle: &mut Option<CompatProxyHandle>,
-    enabled: bool,
-    config: CompatProxyConfig,
-    log: ZenLog,
-    trace: TraceSink,
-    modes: Arc<ThreadModeRegistry>,
-    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
-) -> CompatProxyStatus {
     let port = config.port;
-    // 端口、上游地址与两个行为开关都没变（含 `https://a/` 与 `https://a` 这类等价写法）
+    // 端口、上游地址与收尾助推开关都没变（含 `https://a/` 与 `https://a` 这类等价写法）
     // 才复用现有实例。
     let unchanged = handle.as_ref().is_some_and(|h| h.config.matches(&config));
     let need_start = enabled && !unchanged;
@@ -737,7 +656,7 @@ pub(crate) async fn apply_with_projects(
         }
     }
     if need_start {
-        match start(config, log, trace, modes, projects).await {
+        match start(config, log, trace, modes).await {
             Ok(h) => {
                 *handle = Some(h);
                 CompatProxyStatus {
@@ -767,32 +686,18 @@ pub(crate) async fn apply_with_projects(
 // HTTP 入口
 // ---------------------------------------------------------------------------
 
-/// 代理运行期共享状态；`session` 与真实 opencode 客户端一致，在代理生命周期内保持稳定，
-/// 作为客户端未提供 `session-id` 请求头时的 `x-opencode-session` 回落值。
+/// 代理运行期共享状态。
 #[derive(Clone)]
 struct ProxyState {
-    /// 代理级稳定会话：客户端没给 `session-id` 时用它作 `x-opencode-session`（同样是
-    /// opencode 形状，代理启动时生成一次）。
-    session: String,
-    /// 「codex 会话 id ↔ 上游 `ses_*`」映射表，见 [`SessionMap`]。
-    session_map: Arc<SessionMap>,
-    /// 当前工作区对应的 OpenCode 项目 id。
-    project_id: String,
-    /// 按 codex 线程 id 登记的 OpenCode 项目 id。
-    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
     base_url: String,
+    /// 复用连接池的通用上游 HTTP 客户端。
+    client: reqwest::Client,
     log: ZenLog,
     /// 内容诊断日志（常开）：每次上游尝试的请求体/响应原文/收尾事件。
     trace: TraceSink,
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
-    /// 「OpenCode 客户端身份」开关：是否按 opencode 客户端发请求。开启时既发
-    /// opencode 形状的识别头与 UA，也补免费层请求体门禁字段（`max_tokens` + 6 个内置
-    /// 工具声明，每个带非空参数 schema，见 [`patch_zen_request_body`]）——
-    /// **不看上游 host，对所有上游一视同仁**；
-    /// 关闭时两者一起停用，请求体保持原样。
-    opencode_identity: bool,
     /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
     nudge_enabled: bool,
     /// 上游模型协议记忆（key = model id）：默认按 [`ModelProtocol::Chat`] 翻译，上游以
@@ -870,224 +775,12 @@ fn log_at(log: &Option<Arc<SessionLog>>, level: &str, event: &str, kv: &[(&str, 
     log.write(level, None, event, &kv);
 }
 
-/// opencode 客户端标识的字符集（与 `sst/opencode` 的 `Identifier.create` 一致）。
-const OPENCODE_ID_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-/// opencode 客户端识别头：由「OpenCode 客户端身份」开关统一控制（关闭时一个都不发，
-/// 入站请求带来的同名声也要剔除，避免误当成 opencode 客户端）。
-const OPENCODE_IDENTITY_HEADERS: [&str; 9] = [
-    "x-opencode-client",
-    "x-opencode-project",
-    "x-opencode-request",
-    "x-opencode-session",
-    "x-opencode-session-id",
-    "x-session-affinity",
-    "x-session-id",
-    "b3",
-    "traceparent",
-];
-/// opencode 客户端标识的后段长度：`ses_` / `msg_` 之后固定 26 位。
-const OPENCODE_ID_LEN: usize = 26;
-/// [`opencode_id`] 的进程内计数状态：`(毫秒时间戳, 同毫秒内已用序号)`。
-static OPENCODE_ID_STATE: Mutex<(u64, u64)> = Mutex::new((0, 0));
-/// 会话映射表上限：超出后整体清空再插入（与 [`ThreadModeRegistry`] 同一取舍）。
-const SESSION_MAP_LIMIT: usize = 1024;
-/// 铸号撞上已有会话时的最大重铸次数。
-const SESSION_MAP_MINT_RETRY: usize = 7;
-
-/// 生成 opencode 客户端标识：`prefix_` + 26 位（前 12 位时间十六进制 + 后 14 位随机字母数字）。
-///
-/// 复刻 `sst/opencode` 的 `Identifier.create`：`current = Date.now() * 0x1000 + 计数器`
-/// （计数器同毫秒内自增、跨毫秒清零），`descending` 取 `!current`（会话 id 用降序、
-/// 消息 id 用升序）；前 12 位是 `current` 低 6 字节的小写十六进制，后 14 位是随机字节按
-/// `% 62` 映射到 [`OPENCODE_ID_CHARS`]。Zen 服务端要求 `ses_` / `msg_` 之后恰为 26 位
-/// `[0-9A-Za-z]`（真实 opencode 客户端就是这种形状），格式不符会被判成「非 opencode 客户端」。
-fn opencode_id(prefix: &str, descending: bool) -> String {
-    let (timestamp, counter) = {
-        let mut state = OPENCODE_ID_STATE
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let now = unix_now_ms();
-        if now != state.0 {
-            state.0 = now;
-            state.1 = 0;
-        }
-        state.1 += 1;
-        (state.0, state.1)
-    };
-    let value = {
-        let current = timestamp.wrapping_mul(0x1000).wrapping_add(counter);
-        if descending {
-            !current
-        } else {
-            current
-        }
-    };
-    let mut out = String::with_capacity(prefix.len() + 1 + OPENCODE_ID_LEN);
-    out.push_str(prefix);
-    out.push('_');
-    for index in 0..6 {
-        let byte = ((value >> (40 - 8 * index)) & 0xff) as u8;
-        out.push_str(&format!("{byte:02x}"));
-    }
-    for byte in random_bytes::<14>() {
-        out.push(OPENCODE_ID_CHARS[(byte % 62) as usize] as char);
-    }
-    out
-}
-
-/// 取 `N` 字节随机数：优先 Windows CNG（`BCryptGenRandom` + 系统首选随机源），
-/// 失败时回落到「时间纳秒 + 进程内计数」播种的 SplitMix64（保证不 panic、仍有基本离散度）。
-fn random_bytes<const N: usize>() -> [u8; N] {
-    let mut buf = [0u8; N];
-    if !fill_random_from_cng(&mut buf) {
-        fill_random_fallback(&mut buf);
-    }
-    buf
-}
-
-/// 用 Windows CNG 填充随机字节；返回是否成功。
-#[cfg(windows)]
-fn fill_random_from_cng(buf: &mut [u8]) -> bool {
-    use windows::Win32::Security::Cryptography::{
-        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-    };
-    // SAFETY: 传给 CNG 的是可写切片（长度由 windows crate 换算），`None` 表示使用系统首选
-    // 随机源——不涉及句柄，也就不需要释放。返回 NTSTATUS，0 即 STATUS_SUCCESS。
-    unsafe { BCryptGenRandom(None, buf, BCRYPT_USE_SYSTEM_PREFERRED_RNG).0 == 0 }
-}
-
-#[cfg(not(windows))]
-fn fill_random_from_cng(_buf: &mut [u8]) -> bool {
-    false
-}
-
-/// 随机源不可用时的回落：SplitMix64 由时间纳秒与进程内计数混合播种。
-fn fill_random_fallback(buf: &mut [u8]) {
-    /// SplitMix64 的常量增量。
-    const GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
-    static SEQ: AtomicU64 = AtomicU64::new(1);
-    let mut x = unix_now_nanos() ^ SEQ.fetch_add(1, Ordering::Relaxed).wrapping_mul(GAMMA);
-    for slot in buf.iter_mut() {
-        x = x.wrapping_add(GAMMA);
-        *slot = (mix64(x) >> 32) as u8;
-    }
-}
-
-/// SplitMix64 的最终混合函数。
-fn mix64(mut x: u64) -> u64 {
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
-}
-
-/// 「codex 会话 id ↔ 上游 `x-opencode-session`」双向映射表（内存态，进程内共享）。
-///
-/// 存在的理由：Zen 服务端要求会话标识是 opencode 形状（`ses_` + 26 位 `[0-9A-Za-z]`），
-/// 而 codex 上报的线程 id 是 UUID（带连字符，形状不符）。这里按真实 opencode 的生成规则
-/// （[`opencode_id`] + 降序）为每个 codex 线程铸一个会话 id 并缓存：同一线程的所有请求发
-/// 同一个值（上游按会话分组/限流的语义不变），不同线程互不相同；反向索引让「看到 `ses_*`
-/// 想找回 codex 线程 id」变成一次查表（日志与排查用）。表只存内存：代理重启后同一线程会
-/// 拿到新的 `ses_*`，与 [`ThreadModeRegistry`] 的取舍一致。
-#[derive(Default)]
-struct SessionMap {
-    inner: Mutex<SessionMapInner>,
-}
-
-#[derive(Default)]
-struct SessionMapInner {
-    /// codex 会话 id（归一化后）→ 上游 `ses_*`。
-    forward: HashMap<String, String>,
-    /// 上游 `ses_*` → codex 会话 id（归一化后）。
-    reverse: HashMap<String, String>,
-}
-
-impl SessionMap {
-    /// 取入站会话 id 对应的上游 `ses_*`：首次见到时铸一个并双向登记，之后恒定返回同一个。
-    /// 入站值为空白（或客户端没给）时返回 None，调用方回落到代理级稳定会话。
-    fn resolve(&self, client_session_id: &str) -> Option<String> {
-        self.resolve_with(client_session_id, || opencode_id("ses", true))
-    }
-
-    /// [`SessionMap::resolve`] 的可注入版本：`mint` 负责铸号，便于单测构造撞号场景。
-    fn resolve_with(
-        &self,
-        client_session_id: &str,
-        mut mint: impl FnMut() -> String,
-    ) -> Option<String> {
-        let key = normalize_client_session(client_session_id)?;
-        let Ok(mut inner) = self.inner.lock() else {
-            // 表不可用（锁中毒）时仍要给出合法形状的值：现铸一个，只是失去会话稳定性。
-            return Some(mint());
-        };
-        if let Some(existing) = inner.forward.get(&key) {
-            return Some(existing.clone());
-        }
-        if inner.forward.len() >= SESSION_MAP_LIMIT {
-            inner.forward.clear();
-            inner.reverse.clear();
-        }
-        let mut session = mint();
-        // 撞号（该值已属于另一个 codex 会话）就重铸；26 位标识撞号概率可忽略，
-        // 重试用尽后沿用最后一次取值（反向索引只保留最新一条）。
-        for _ in 0..SESSION_MAP_MINT_RETRY {
-            if !inner.reverse.contains_key(&session) {
-                break;
-            }
-            session = mint();
-        }
-        inner.forward.insert(key.clone(), session.clone());
-        inner.reverse.insert(session.clone(), key);
-        Some(session)
-    }
-
-    /// 反查：由上游 `ses_*` 找回 codex 会话 id；未登记（如代理级回落会话）返回 None。
-    fn codex_of(&self, session: &str) -> Option<String> {
-        let inner = self.inner.lock().ok()?;
-        inner.reverse.get(session).cloned()
-    }
-}
-
 /// 归一化入站会话 id：trim 后剥掉可能存在的 `ses_` 前缀（codex 上报的是裸线程 id），
 /// 结果为空时返回 None（调用方视为「客户端没给会话 id」）。
 fn normalize_client_session(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let bare = trimmed.strip_prefix("ses_").unwrap_or(trimmed).trim();
     (!bare.is_empty()).then(|| bare.to_string())
-}
-
-fn http_client(opencode_identity: bool) -> &'static wreq::Client {
-    static PLAIN: std::sync::OnceLock<wreq::Client> = std::sync::OnceLock::new();
-    static OPENCODE: std::sync::OnceLock<wreq::Client> = std::sync::OnceLock::new();
-    let slot = if opencode_identity { &OPENCODE } else { &PLAIN };
-    slot.get_or_init(|| build_http_client(opencode_identity))
-}
-
-fn build_http_client(opencode_identity: bool) -> wreq::Client {
-    let mut headers_order = Vec::new();
-    if opencode_identity {
-        headers_order.extend(
-            crate::codex::opencode_profile::OPENCODE_HEADER_ORDER
-                .iter()
-                .filter_map(|name| wreq::header::HeaderName::from_bytes(name.as_bytes()).ok()),
-        );
-    }
-    let http1_config = wreq::Http1Config::builder().build();
-    let http2_config = wreq::Http2Config::builder().build();
-    let tls_config = if opencode_identity {
-        crate::codex::opencode_profile::tls_config()
-    } else {
-        wreq::TlsConfig::default()
-    };
-    let emulation = wreq::EmulationProvider::builder()
-        .http1_config(http1_config)
-        .tls_config(tls_config)
-        .http2_config(http2_config)
-        .headers_order(headers_order)
-        .build();
-    wreq::Client::builder()
-        .emulation(emulation)
-        .build()
-        .unwrap_or_else(|_| wreq::Client::new())
 }
 
 /// `compat_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
@@ -1297,7 +990,7 @@ async fn handle_translated_responses(
     let mut req = req.clone();
     let want_stream = req.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     // 本次入站请求的稳定标识：贯穿内容日志文件名与 session 日志行。
-    let call_id = opencode_id("req", false);
+    let call_id = gen_id("req");
     // 协作模式先按协议登记表解析（查不到才退回关键词），日志里连同来源一起记下
     let (plan_mode, mode_src) = resolve_nudge_mode(state, headers, &req);
     let mode = if plan_mode { "plan" } else { "default" };
@@ -1345,10 +1038,6 @@ async fn handle_translated_responses(
                     (
                         "reasoning_rc",
                         if forwarded.reasoning_rc { "on" } else { "off" }.to_string(),
-                    ),
-                    (
-                        "身份伪装",
-                        if state.opencode_identity { "on" } else { "off" }.to_string(),
                     ),
                 ],
             );
@@ -1811,13 +1500,13 @@ fn rewrite_responses_frame(frame: &[u8], st: &mut ResponsesToolRewrite, log: &Ze
 
 /// 把上游 SSE 字节流按帧改写后下发（只在本次请求含 custom 工具时使用）。
 fn rewrite_responses_stream(
-    stream: impl Stream<Item = Result<axum::body::Bytes, wreq::Error>> + Send + 'static,
+    stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static,
     state: ResponsesToolRewrite,
     log: ZenLog,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static {
     /// 上游字节流（装箱固定，`unfold` 的 carry 需要可移动）
     type Inner = std::pin::Pin<
-        Box<dyn Stream<Item = Result<axum::body::Bytes, wreq::Error>> + Send + 'static>,
+        Box<dyn Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static>,
     >;
     struct Carry {
         inner: Inner,
@@ -1870,7 +1559,7 @@ fn rewrite_responses_stream(
     )
 }
 
-/// Responses 直通路径：按身份开关补门禁后把请求体发给上游**同一路径**，上游 SSE 逐字回传。
+/// Responses 直通路径：仅做通用协议兼容后把请求体发给上游**同一路径**，上游 SSE 回传。
 ///
 /// 与翻译路径的差异（有意为之）：不注入收尾契约、不做口嗨续跑/标签剥离/历史净化/
 /// 畸形工具调用保护/usage 明细映射/命名空间展开 —— 这条路径只服务「上游只认 Responses 协议」
@@ -1899,7 +1588,7 @@ async fn handle_responses_passthrough(
     let mut body = req.clone();
     // 上游 `/responses` 拒收 `custom` 工具（codex 的 apply_patch 只能这样声明）：
     // 先归一化成同名 function，响应侧再回译成 `custom_tool_call`（见 ResponsesToolRewrite）。
-    // 与「OpenCode 客户端身份」开关无关——这是协议兼容，不是伪装。
+    // 这是 Responses 协议兼容处理，与上游身份或客户端版本无关。
     let custom_tools = normalize_responses_tools(&mut body);
     if !custom_tools.is_empty() {
         log_at(
@@ -1913,7 +1602,7 @@ async fn handle_responses_passthrough(
         );
     }
     // 历史里的思维链 item：翻译路径合成的那种「有 id、没 encrypted_content」上游会按 id 查而拒，
-    // 统一把这类 item 的 id 剥掉（只留 summary）。同样与身份开关无关：协议兼容而非伪装。
+    // 统一把这类 item 的 id 剥掉（只留 summary），属于通用协议兼容处理。
     let stripped = sanitize_responses_reasoning_items(&mut body);
     if stripped > 0 {
         log_at(
@@ -1922,22 +1611,6 @@ async fn handle_responses_passthrough(
             "compat_proxy.reasoning_ids_stripped",
             &[("count", stripped.to_string())],
         );
-    }
-    if state.opencode_identity {
-        patch_responses_gate(&mut body);
-        // 与翻译路径同一道门禁口径：合格工具不足时上游必然 403，提前记一条便于定位
-        let gate_tools = count_gate_tools(&body);
-        if gate_tools < ZEN_MIN_GATE_TOOLS {
-            log_at(
-                &state.log,
-                "warn",
-                "compat_proxy.zen_tools",
-                &[
-                    ("gate_tools", gate_tools.to_string()),
-                    ("required", ZEN_MIN_GATE_TOOLS.to_string()),
-                ],
-            );
-        }
     }
     let bytes = match serde_json::to_vec(&body) {
         Ok(bytes) => bytes,
@@ -2006,9 +1679,10 @@ async fn forward_passthrough_rewriting(
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
-    let rq = http_client(state.opencode_identity)
-        .request(to_wreq_method(&Method::POST), url)
-        .headers(forwarded_request_headers(headers, state))
+    let rq = state
+        .client
+        .request(to_reqwest_method(&Method::POST), url)
+        .headers(forwarded_request_headers(headers))
         .body(body);
     match rq.send().await {
         Ok(resp) => {
@@ -2055,11 +1729,12 @@ async fn forward_passthrough(
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
-    let mut rq = http_client(state.opencode_identity)
-        .request(to_wreq_method(&method), url)
-        .headers(forwarded_request_headers(headers, state));
+    let mut rq = state
+        .client
+        .request(to_reqwest_method(&method), url)
+        .headers(forwarded_request_headers(headers));
     if method_has_body(&method) {
-        rq = rq.body(wreq::Body::wrap_stream(body.into_data_stream()));
+        rq = rq.body(reqwest::Body::wrap_stream(body.into_data_stream()));
     }
     match rq.send().await {
         Ok(resp) => {
@@ -2094,8 +1769,8 @@ fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str
 }
 
 /// 透传目标 URL：scheme/host/port 取自 base_url，入站 path 与 query 原样发出（零路径转换）。
-fn passthrough_url(base_url: &str, uri: &Uri) -> Result<wreq::Url, String> {
-    let mut url = wreq::Url::parse(&normalize_base_url(base_url))
+fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(&normalize_base_url(base_url))
         .map_err(|e| format!("兼容代理转发地址无效: {e}"))?;
     url.set_path(uri.path());
     url.set_query(uri.query());
@@ -2103,93 +1778,14 @@ fn passthrough_url(base_url: &str, uri: &Uri) -> Result<wreq::Url, String> {
     Ok(url)
 }
 
-/// 上游 `x-opencode-session` 取值：按入站请求头 `session-id`（OpenAI 协议会话标识，codex
-/// 每次请求都会带上）查 [`SessionMap`]，首次见到就按 opencode 规则铸一个 `ses_*` 并登记
-/// （同一 codex 线程恒定、不同线程不同）；请求头缺失、空白或非可见 ASCII 时回落到代理
-/// 生命周期内稳定的 `state.session`（同样是合法形状）。
-fn opencode_session(state: &ProxyState, headers: &HeaderMap) -> String {
-    headers
-        .get("session-id")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| state.session_map.resolve(value))
-        .unwrap_or_else(|| state.session.clone())
-}
-
-/// 按「OpenCode 客户端身份」开关落到请求头上的全部效果（翻译路径与透传路径共用）：
-/// - 开启：附加 OpenCode 2.1.4 的识别头、会话别名、追踪头与客户端 UA，入站 UA 一律丢弃；
-/// - 关闭：不附加任何识别头，并把入站自带的同名头剔除（避免仍然“自称 opencode”），
-///   UA 改为透传入站值；入站没有 UA 时不带 UA（客户端不再设默认 UA）。
-///
-/// `session` 由调用方提供，保证内容日志里记的值与实发头逐字一致。
-fn apply_opencode_identity(
-    out: &mut HeaderMap,
-    headers: &HeaderMap,
-    state: &ProxyState,
-    session: &str,
-    _request_id: &str,
-) {
-    for name in OPENCODE_IDENTITY_HEADERS {
-        out.remove(name);
-    }
-    out.remove(header::USER_AGENT);
-    if !state.opencode_identity {
-        if let Some(ua) = headers.get(header::USER_AGENT) {
-            out.insert(header::USER_AGENT, ua.clone());
-        }
-        return;
-    }
-    out.insert(
-        "x-opencode-client",
-        HeaderValue::from_static(OPENCODE_CLIENT),
-    );
-    out.insert(
-        "x-opencode-project",
-        HeaderValue::from_str(&opencode_project(state, session))
-            .expect("OpenCode 项目 id 必须合法"),
-    );
-    if let Ok(value) = HeaderValue::from_str(session) {
-        out.insert("x-opencode-session", value.clone());
-        out.insert("x-opencode-session-id", value.clone());
-        out.insert("x-session-affinity", value.clone());
-        out.insert("x-session-id", value);
-    }
-    if let Ok(value) = HeaderValue::from_str(ZEN_USER_AGENT) {
-        out.insert(header::USER_AGENT, value);
-    }
-    for (name, value) in tracing_headers() {
-        out.insert(name, value);
-    }
-    out.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
-    out.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
-    out.insert(
-        header::ACCEPT_ENCODING,
-        HeaderValue::from_static("gzip, deflate"),
-    );
-}
-
-fn opencode_project(state: &ProxyState, session: &str) -> String {
-    state
-        .session_map
-        .codex_of(session)
-        .and_then(|thread_id| state.projects.get(&thread_id))
-        .unwrap_or_else(|| state.project_id.clone())
-}
-
-/// 构造转发给上游的请求头：保留入站头，剔除逐跳头，再按身份开关补识别头/UA。
-fn forwarded_request_headers(headers: &HeaderMap, state: &ProxyState) -> HeaderMap {
+/// 构造转发给上游的请求头：保留入站头并剔除逐跳头。
+fn forwarded_request_headers(headers: &HeaderMap) -> HeaderMap {
     let mut out = headers.clone();
     for name in HOP_BY_HOP_HEADERS {
         out.remove(name);
     }
     out.remove(header::HOST);
     out.remove(header::CONTENT_LENGTH);
-    apply_opencode_identity(
-        &mut out,
-        headers,
-        state,
-        &opencode_session(state, headers),
-        &opencode_id("msg", false),
-    );
     out
 }
 
@@ -2207,11 +1803,11 @@ fn method_has_body(method: &Method) -> bool {
     method != Method::GET && method != Method::HEAD && method != Method::OPTIONS
 }
 
-fn to_wreq_method(method: &Method) -> wreq::Method {
-    wreq::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(wreq::Method::GET)
+fn to_reqwest_method(method: &Method) -> reqwest::Method {
+    reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET)
 }
 
-async fn passthrough_response(resp: wreq::Response) -> Response {
+async fn passthrough_response(resp: reqwest::Response) -> Response {
     let status = resp.status();
     let headers = forwarded_response_headers(resp.headers());
     let stream = resp
@@ -2229,7 +1825,7 @@ async fn passthrough_response(resp: wreq::Response) -> Response {
 /// 上游响应载体：2xx 保留可流式读取的响应；4xx 为判定 `stream_options` 兼容性
 /// 读出错误体时直接携带文本，避免二次读取。
 enum ForwardPayload {
-    Live(wreq::Response),
+    Live(reqwest::Response),
     Text(String),
 }
 
@@ -2362,224 +1958,6 @@ fn optional_fields(req: &Value, want_stream: bool) -> Vec<OptionalField> {
         });
     }
     out
-}
-
-/// Zen 免费层的 `max_tokens` 补法：只在入站请求**没有**自己的输出预算（`max_output_tokens`
-/// 缺失或为 null）时才补 [`ZEN_MAX_TOKENS`]，客户端显式给的预算一律尊重。
-///
-/// 走 [`OptionalField`] 而不是直接写进请求体，是为了复用既有的降级路径：上游若在 4xx
-/// 错误体里指名 `max_tokens`（某些模型中上游拒绝超出自身上限的值），会被摘掉后重试一次。
-fn zen_max_tokens_field(req: &Value) -> Option<OptionalField> {
-    match req.get("max_output_tokens") {
-        Some(v) if !v.is_null() => None,
-        _ => Some(OptionalField {
-            key: "max_tokens",
-            needles: &["max_tokens"],
-            value: json!(ZEN_MAX_TOKENS),
-        }),
-    }
-}
-
-/// 请求体形状补丁（由「OpenCode 客户端身份」开关决定是否调用）：把门禁要求的
-/// [`ZEN_REQUIRED_TOOL_NAMES`] 以假工具追加到 `tools` **末尾**。
-///
-/// 只补缺失的名字：客户端已声明的真实工具（含命名空间扁平名与自由格式工具）一律保留、
-/// 顺序不变，同名时以客户端声明为准（不覆盖）；入站请求原本没有 `tools` 时，数组只含这
-/// 几个假工具。幂等：重复调用不会叠加。
-///
-/// 每个假工具带**非空** `parameters`（取自 [`ZEN_TOOL_SCHEMAS_JSON`]）：门禁要求
-/// `parameters.properties` 非空才算合格（见 [`ZEN_MIN_GATE_TOOLS`]），空 schema 会让
-/// 整批假工具都不计数、请求被上游 403 拒掉。描述仍是 [`ZEN_FAKE_TOOL_DESCRIPTION`]，
-/// 负责劝模型别真调用这些没有实现的工具。
-///
-/// 补完工具后另把「弃用工具声明」教学写进 `messages`（见 [`inject_fake_tools_instruction`]）：
-/// 上游是 chat/completions，没有 `instructions` 字段，教学只能走消息列表。
-fn patch_zen_request_body(body: &mut Value) {
-    let existing = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    // chat 侧工具名就是 `tools[i].function.name`（命名空间已展开成扁平名，自由格式工具
-    // 也是单参数函数），因此按这个路径取名字即可与既有去重口径一致。
-    let mut seen: HashSet<String> = existing
-        .iter()
-        .filter_map(|tool| tool.pointer("/function/name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-    let mut tools = existing;
-    let mut added: Vec<&str> = Vec::new();
-    for name in ZEN_REQUIRED_TOOL_NAMES {
-        if !seen.insert(name.to_string()) {
-            continue;
-        }
-        added.push(name);
-        tools.push(json!({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": ZEN_FAKE_TOOL_DESCRIPTION,
-                "parameters": zen_tool_parameters(name)
-            }
-        }));
-    }
-    body["tools"] = Value::Array(tools);
-    // 动态教学：只列出真正被追加的工具名，与 description 形成双重约束
-    if let Some(text) = fake_tools_instruction(&added) {
-        inject_fake_tools_instruction(body, &text);
-    }
-}
-
-/// 门禁要用的假工具 `parameters`：按工具名取自 [`ZEN_TOOL_SCHEMAS_JSON`]（OnceLock 缓存，
-/// 只解析一次）。资源缺失/非法/少了某个名字时退化为占位 schema —— 门禁只看
-/// `parameters.properties` 是否非空，因此兜底也不会让请求被判不合格。
-fn zen_tool_parameters(name: &str) -> Value {
-    static SCHEMAS: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
-    let schemas = SCHEMAS.get_or_init(|| {
-        serde_json::from_str::<Value>(ZEN_TOOL_SCHEMAS_JSON)
-            .ok()
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default()
-    });
-    schemas
-        .get(name)
-        .cloned()
-        .unwrap_or_else(|| json!({ "type": "object", "properties": { "x": { "type": "string" } } }))
-}
-
-/// Responses 形状的门禁补丁（仅「OpenCode 客户端身份」开启时调用）：`tools` 里补缺失的
-/// [`ZEN_REQUIRED_TOOL_NAMES`] 声明（Responses 形状：`name`/`parameters` 在顶层，
-/// 带 `strict:false`，描述仍是弃用文案），并把「弃用工具声明」教学并入顶层 `instructions`。
-///
-/// 门禁口径与 chat 侧完全一致（名字在名单内 + `parameters.properties` 非空，≥
-/// [`ZEN_MIN_GATE_TOOLS`] 个）—— 不做这一步的话，codex 自己的工具名（`shell`/`apply_patch`/
-/// namespace 工具）一个都不合格，免费层会直接 403（2026-10-15 实测）。
-///
-/// 除 `tools` 与 `instructions` 外**一个字段都不动**：namespace 工具与 `store`/`include`/
-/// `prompt_cache_key`/`reasoning`/`text` 等实测都被上游原样接受，直通模式不做任何改写。
-/// 幂等：重复调用不叠加（同名以客户端声明为准，不改写客户端已有的工具）。
-fn patch_responses_gate(body: &mut Value) {
-    let existing = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    // Responses 侧工具名就是 `tools[i].name`（没有 chat 那层 `function` 包装）
-    let mut seen: HashSet<String> = existing
-        .iter()
-        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-    let mut tools = existing;
-    let mut added: Vec<&str> = Vec::new();
-    for name in ZEN_REQUIRED_TOOL_NAMES {
-        if !seen.insert(name.to_string()) {
-            continue;
-        }
-        added.push(name);
-        tools.push(json!({
-            "type": "function",
-            "name": name,
-            "description": ZEN_FAKE_TOOL_DESCRIPTION,
-            "parameters": zen_tool_parameters(name),
-            "strict": false
-        }));
-    }
-    body["tools"] = Value::Array(tools);
-    if let Some(text) = fake_tools_instruction(&added) {
-        merge_responses_instructions(body, &text);
-    }
-}
-
-/// 把弃用工具教学并入 Responses 顶层 `instructions`（**不是** `messages`：Responses 协议里
-/// 开发者指令就在这个字段）。已有字符串则追加到末尾、缺失则新建；已含该文本时跳过（幂等）。
-fn merge_responses_instructions(body: &mut Value, text: &str) {
-    match body.get("instructions").and_then(Value::as_str) {
-        Some(existing) if existing.contains(text) => {}
-        Some(existing) => {
-            body["instructions"] = Value::String(format!("{existing}\n\n{text}"));
-        }
-        // 缺失或不是字符串（非标准形态）：直接覆盖成教学文本，保证模型能看到
-        None => body["instructions"] = Value::String(text.to_string()),
-    }
-}
-
-/// 统计请求体 `tools` 里「名字在 [`ZEN_REQUIRED_TOOL_NAMES`] 内、且
-/// `parameters.properties` 是非空对象」的条数——免费层门禁按这个数判定
-/// （≥ [`ZEN_MIN_GATE_TOOLS`] 才放行）。纯函数，便于单测。
-///
-/// 同时认两种工具形状：chat 的 `function.name` / `function.parameters.properties`，
-/// 以及 Responses 的顶层 `name` / `parameters.properties`。
-fn count_gate_tools(body: &Value) -> usize {
-    body.get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter(|tool| {
-                    let name = tool
-                        .pointer("/function/name")
-                        .and_then(Value::as_str)
-                        .or_else(|| tool.get("name").and_then(Value::as_str));
-                    let is_gate_name =
-                        name.is_some_and(|name| ZEN_REQUIRED_TOOL_NAMES.contains(&name));
-                    let has_properties = tool
-                        .pointer("/function/parameters/properties")
-                        .or_else(|| tool.pointer("/parameters/properties"))
-                        .and_then(Value::as_object)
-                        .is_some_and(|properties| !properties.is_empty());
-                    is_gate_name && has_properties
-                })
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-/// 根据实际追加的工具名列表动态生成弃用教学文本；列表为空时返回 None。
-fn fake_tools_instruction(added: &[&str]) -> Option<String> {
-    if added.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "【弃用工具声明】以下工具已弃用，禁止调用：{}。这些工具名仅用于满足客户端门禁校验，实际没有任何实现。如果你需要执行类似操作，请使用可用的工具完成任务。",
-        added.join("、")
-    ))
-}
-
-/// 把弃用工具教学文本并入发往上游的 `messages`（**不是**顶层 `instructions`）。
-///
-/// 上游是 chat/completions，协议里没有 `instructions` 这个字段：入站的 Responses
-/// `instructions` 早在 [`responses_to_chat`] 阶段就被消费成了 `messages[0]` 的 system 消息，
-/// 翻译后的请求体顶层根本没有该键——写在那里只会给上游多发一个未知字段，模型永远看不到。
-/// 因此教学只能落进消息列表：
-/// - 首条是 system 消息且 `content` 是字符串 → 追加到它末尾（原内容逐字保留、仍是前缀）；
-/// - 否则（没有 system 消息，或首条 system 的 `content` 不是字符串）→ 在 `messages` **最前**
-///   插一条独立 system 消息，已有消息顺序不变。
-///
-/// 幂等：目标 system 消息已包含该文本时直接返回（首次调用后首条必为带教学的 system 消息，
-/// 重复调用天然命中）。`messages` 缺失或不是数组时按空数组新建（纯函数，不 panic）。
-fn inject_fake_tools_instruction(body: &mut Value, text: &str) {
-    if !body.get("messages").is_some_and(Value::is_array) {
-        body["messages"] = json!([]);
-    }
-    let leading_system_text = body["messages"]
-        .as_array()
-        .and_then(|messages| messages.first())
-        .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    match leading_system_text {
-        Some(existing) if existing.contains(text) => {}
-        Some(existing) => {
-            body["messages"][0]["content"] = Value::String(format!("{existing}\n\n{text}"));
-        }
-        None => {
-            if let Some(messages) = body["messages"].as_array_mut() {
-                messages.insert(0, json!({ "role": "system", "content": text }));
-            }
-        }
-    }
 }
 
 /// Responses 直通路径的**工具归一化**：把 `type:"custom"`（codex 的 `apply_patch` 只能这样声明）
@@ -2917,15 +2295,10 @@ fn patch_failure_count(req: &Value) -> usize {
 }
 
 /// 内容日志的请求侧元信息：`Authorization` 只记 presence，任何情况下不落盘 API Key。
-#[allow(clippy::too_many_arguments)]
 fn note_request_meta(
     call: &mut TraceCall,
     url: &str,
-    request_id: &str,
     headers: &HeaderMap,
-    session: &str,
-    session_codex: Option<&str>,
-    identity: bool,
     body: &Value,
     dropped: &[&'static str],
     reasoning_rc: bool,
@@ -2937,32 +2310,6 @@ fn note_request_meta(
             "present"
         } else {
             "absent"
-        },
-    );
-    // 身份开关关闭时不发识别头，日志同样记 `-`（否则会误导成「已发过这个会话 id」）
-    call.note("identity", if identity { "on" } else { "off" });
-    call.note(
-        "x_opencode_session",
-        if identity {
-            session.to_string()
-        } else {
-            "-".to_string()
-        },
-    );
-    call.note(
-        "session_codex",
-        if identity {
-            session_codex.unwrap_or("-").to_string()
-        } else {
-            "-".to_string()
-        },
-    );
-    call.note(
-        "x_opencode_request",
-        if identity {
-            request_id.to_string()
-        } else {
-            "-".to_string()
         },
     );
     call.note(
@@ -3006,8 +2353,8 @@ fn note_request_meta(
     call.note("reasoning_rc", if reasoning_rc { "on" } else { "off" });
 }
 
-/// 翻译请求并转发到 Zen（含历史净化与可选字段降级重试）。
-/// `state` 提供上游地址（测试时可指向本地 mock）、会话映射与代理级状态。
+/// 翻译请求并转发到通用 Chat Completions 上游（含历史净化与可选字段降级重试）。
+/// `state` 提供上游地址、HTTP 客户端与代理级状态。
 /// `call_id` 用于把本次入站请求的多次尝试（内容日志）关联到同一条 session 日志。
 async fn forward(
     req: &Value,
@@ -3017,32 +2364,7 @@ async fn forward(
     call_id: &str,
 ) -> Result<Forwarded, (StatusCode, String)> {
     let url = format!("{}/chat/completions", state.base_url.trim_end_matches('/'));
-    let client = http_client(state.opencode_identity);
-    // 本会话发往上游的 x-opencode-session（同一 codex 线程在代理生命周期内恒定）
-    let session = opencode_session(state, headers);
-    // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
-    let session_codex = state.session_map.codex_of(&session);
-    let mut optional = optional_fields(req, want_stream);
-    // 请求体门禁之一：补 `max_tokens`（与 messages 同级）。它与下面的工具名补丁
-    // **同受「OpenCode 客户端身份」开关约束**——开启即对所有上游都补，关闭即都不补
-    // （无法只开其中一项）。放进可选字段列表是为了上游指名拒绝它能走既有
-    // 「摘掉后重试一次」的降级。
-    if state.opencode_identity {
-        if let Some(field) = zen_max_tokens_field(req) {
-            optional.push(field);
-        }
-    }
-    // 免费层门禁要求上游请求体的 `stream` 为 true（2026-10-15 实测：同形状请求把
-    // `stream` 改成 false 立刻 403）。客户端要非流式时不改变转发语义，只记一条 warn，
-    // 好让上游随后返回的那条 403 有明确解释。
-    if state.opencode_identity && !want_stream {
-        log_at(
-            &state.log,
-            "warn",
-            "compat_proxy.zen_stream_required",
-            &[("call_id", call_id.to_string())],
-        );
-    }
+    let optional = optional_fields(req, want_stream);
     let mut dropped: Vec<&'static str> = Vec::new();
     let mut reasoning_rc = state.requires_reasoning_rc.load(Ordering::Relaxed);
     let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
@@ -3055,26 +2377,6 @@ async fn forward(
         attempt_no += 1;
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
-        // 同一道门禁的另一项：工具名每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）。
-        // 与上面的 `max_tokens` 完全同源，同样只看「OpenCode 客户端身份」开关。
-        if state.opencode_identity {
-            patch_zen_request_body(&mut body);
-            // 门禁按「合格工具条数」判定（见 [`ZEN_MIN_GATE_TOOLS`]）：不足时上游必然 403，
-            // 提前记一条诊断，避免以后上游再变时只能对着一条 403 猜。
-            let gate_tools = count_gate_tools(&body);
-            if gate_tools < ZEN_MIN_GATE_TOOLS {
-                log_at(
-                    &state.log,
-                    "warn",
-                    "compat_proxy.zen_tools",
-                    &[
-                        ("gate_tools", gate_tools.to_string()),
-                        ("required", ZEN_MIN_GATE_TOOLS.to_string()),
-                        ("call_id", call_id.to_string()),
-                    ],
-                );
-            }
-        }
         for field in optional.iter() {
             if dropped.contains(&field.key) {
                 continue;
@@ -3083,21 +2385,9 @@ async fn forward(
         }
         // 内容诊断日志：先落盘本次尝试实际发出的请求体与关键元信息（不含 API Key）
         let mut call = state.trace.begin(call_id, attempt_no);
-        let request_id = opencode_id("msg", false);
-        note_request_meta(
-            &mut call,
-            &url,
-            &request_id,
-            headers,
-            &session,
-            session_codex.as_deref(),
-            state.opencode_identity,
-            &body,
-            &dropped,
-            reasoning_rc,
-        );
+        note_request_meta(&mut call, &url, headers, &body, &dropped, reasoning_rc);
         call.write_request_json(&body);
-        let resp = build_chat_request(client, &url, state, headers, &session, &request_id, &body)
+        let resp = build_chat_request(&url, state, headers, &body)
             .send()
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
@@ -3192,32 +2482,21 @@ async fn forward(
     }
 }
 
-/// 构造发往 Zen 的 chat/completions 请求：识别头/UA 按「OpenCode 客户端身份」开关决定
-/// （见 [`apply_opencode_identity`]），Authorization 始终原样透传。
+/// 构造发往上游的 chat/completions 请求：透传入站 Authorization，不生成客户端身份头。
 fn build_chat_request(
-    client: &wreq::Client,
     url: &str,
     state: &ProxyState,
     headers: &HeaderMap,
-    session: &str,
-    request_id: &str,
     body: &Value,
-) -> wreq::RequestBuilder {
-    let mut rq = client.post(url).json(body);
-    let mut identity = HeaderMap::new();
-    apply_opencode_identity(&mut identity, headers, state, session, request_id);
-    for (name, value) in identity.iter() {
-        rq = rq.header(name, value.clone());
-    }
-    if let Some(auth) = headers.get(header::AUTHORIZATION) {
-        if let Ok(v) = auth.to_str() {
-            rq = rq.header(header::AUTHORIZATION, v.to_string());
-        }
+) -> reqwest::RequestBuilder {
+    let mut rq = state.client.post(url).json(body);
+    for (name, value) in forwarded_request_headers(headers).iter() {
+        rq = rq.header(name.clone(), value.clone());
     }
     rq
 }
 
-/// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
+/// 非流式：把 Chat Completions JSON 翻译为 Responses 对象。
 /// 可疑结束判定的输入事实（纯数据结构，便于单测）。
 #[derive(Default)]
 struct SuspiciousFacts<'a> {
@@ -3335,7 +2614,7 @@ fn note_chat_result(call: &mut TraceCall, chat: &Value) {
 /// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
 async fn proxy_json_response(
     req: Value,
-    resp: wreq::Response,
+    resp: reqwest::Response,
     log: &Option<Arc<SessionLog>>,
     strip_tags: bool,
     mut call: TraceCall,
@@ -3423,7 +2702,7 @@ async fn proxy_json_response(
 /// 这样「口嗨检测 + 续跑」才能把第二轮的事件续在同一个响应流里。
 /// `trace` 为这一轮的内容日志句柄（第一轮是入站 call，续跑轮各有自己的）。
 async fn pump_stream(
-    resp: wreq::Response,
+    resp: reqwest::Response,
     st: &mut StreamState,
     log: &ZenLog,
     tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -3537,7 +2816,7 @@ async fn proxy_stream_response(
     headers: HeaderMap,
     call_id: String,
     req: Value,
-    resp: wreq::Response,
+    resp: reqwest::Response,
     call: TraceCall,
 ) -> Response {
     let model = req
@@ -3598,7 +2877,7 @@ async fn run_stream_task(
     headers: HeaderMap,
     call_id: String,
     req: Value,
-    first_resp: wreq::Response,
+    first_resp: reqwest::Response,
     call: TraceCall,
     response_id: String,
     model: String,
@@ -3626,7 +2905,12 @@ async fn run_stream_task(
     let (plan_mode, _) = resolve_nudge_mode(&state, &headers, &req);
     // 会话标题生成任务（应用的后台临时线程）：整轮放行，不催办也不注入
     let title_task = request_is_title_task(&req);
-    let session = opencode_session(&state, &headers);
+    let session = headers
+        .get("session-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("-")
+        .to_string();
 
     let mut body = req.clone();
     let mut current = first_resp;
@@ -4202,15 +3486,7 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// 当前 Unix 毫秒时间戳（opencode 标识里的时间部分）。
-fn unix_now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// 当前 Unix 纳秒时间戳（仅用于随机源回落的播种）。
+/// 当前 Unix 纳秒时间戳（用于本地生成请求 id）。
 fn unix_now_nanos() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4223,7 +3499,7 @@ fn gen_id(prefix: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(1);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    let now = unix_now();
+    let now = unix_now_nanos();
     format!("{prefix}_{now}_{n:x}")
 }
 

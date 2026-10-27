@@ -347,11 +347,7 @@ fn models_url(base_url: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(base_url.trim())
         .map_err(|e| format!("模型提供者 base_url 无效: {e}"))?;
     let path = url.path().trim_end_matches('/');
-    let path = if url.host_str() == Some("opencode.ai") && path == "/inference/openai/v1" {
-        // OpenCode 2.1.4 的 OpenAI 兼容 chat 路径不提供 /models；
-        // 官方模型清单仍由相邻的 inference/v1 端点提供。
-        "/inference/v1/models".to_string()
-    } else if path.ends_with("/models") {
+    let path = if path.ends_with("/models") {
         path.to_string()
     } else if path.is_empty() {
         "/models".to_string()
@@ -701,7 +697,7 @@ mod tests {
         );
         assert_eq!(
             models_url("https://opencode.ai/inference/openai/v1").unwrap(),
-            "https://opencode.ai/inference/v1/models"
+            "https://opencode.ai/inference/openai/v1/models"
         );
     }
 

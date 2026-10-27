@@ -11,14 +11,10 @@ import {
 } from "../../composables/useCodex";
 import { ICON_SAVE } from "../../lib/icons";
 import { copyText } from "../../lib/clipboard";
-import { openDocsUrl } from "../../lib/links";
 
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1";
-/** 顶部说明里「Zen 免费模型」的文档地址（浏览器打开） */
-const ZEN_DOCS_URL = "https://opencode.ai/zen";
 
 /** 本地代理运行状态（由 compat_proxy_status 驱动；未获取时默认停止） */
 const status = ref<CompatProxyStatus>({ running: false, port: DEFAULT_PORT });
@@ -26,29 +22,22 @@ const status = ref<CompatProxyStatus>({ running: false, port: DEFAULT_PORT });
 const portInput = ref<string>(
   String(store.settings.compat_proxy_port ?? DEFAULT_PORT),
 );
-/** API 请求地址输入（本地缓冲，保存时写回；空回退默认） */
-const apiUrlInput = ref<string>(
-  store.settings.compat_proxy_base_url ?? DEFAULT_BASE_URL,
-);
+/** API 请求地址输入（本地缓冲，保存时写回；空值不能启动代理） */
+const apiUrlInput = ref<string>(store.settings.compat_proxy_base_url ?? "");
 /** 回合收尾约束和助推（本地缓冲，保存时写回；缺省开启） */
 const nudgeEnabled = ref<boolean>(
   store.settings.compat_proxy_nudge_enabled ?? true,
 );
-/** OpenCode 客户端身份（本地缓冲，保存时写回；缺省开启） */
-const identityEnabled = ref<boolean>(
-  store.settings.compat_proxy_identity_enabled ?? true,
-);
 /** 输入校验错误信息 */
 const portError = ref<string>("");
 
-/** 本次要应用的选项（端口 / 上游 / 两个行为开关的当前缓冲值） */
+/** 本次要应用的选项（端口 / 上游 / 收尾助推的当前缓冲值） */
 function currentOptions(enabled: boolean, port: number) {
   return {
     enabled,
     port,
-    baseUrl: apiUrlInput.value.trim() || DEFAULT_BASE_URL,
+    baseUrl: apiUrlInput.value.trim(),
     nudgeEnabled: nudgeEnabled.value,
-    identityEnabled: identityEnabled.value,
   };
 }
 
@@ -57,7 +46,8 @@ function currentOptions(enabled: boolean, port: number) {
  * （codex 请求 `{base_url}/responses`，两侧路径必须一致，只换 host）。
  */
 const localBaseUrlHint = computed(() => {
-  const raw = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
+  const raw = apiUrlInput.value.trim();
+  if (!raw) return "";
   let path = "";
   try {
     path = new URL(raw).pathname.replace(/\/+$/, "");
@@ -88,6 +78,7 @@ async function refresh() {
 
 /** 点击胶囊：把本机 base_url 复制到剪贴板并提示（失败按既有范式提示手动复制） */
 async function copyBaseUrl() {
+  if (!localBaseUrlHint.value) return;
   const ok = await copyText(localBaseUrlHint.value);
   setToast(ok ? "已复制 base_url" : "复制失败，请手动选择复制");
 }
@@ -97,6 +88,11 @@ async function onToggle(checked: boolean) {
   const port = validatePort(portInput.value);
   if (!port) {
     setToast("端口无效，请检查输入");
+    return;
+  }
+  if (checked && !apiUrlInput.value.trim()) {
+    setToast("请先填写模型提供方的 base_url");
+    await refresh();
     return;
   }
   const ok = await toggleCompatProxy(currentOptions(checked, port));
@@ -138,15 +134,9 @@ onBeforeUnmount(refresh);
     <h2 class="settings-section-title">兼容代理</h2>
     <p class="settings-section-desc">
       本地开放 Responses API 端点，翻译为 Chat Completions 后转发到任意 OpenAI
-      兼容上游（默认 OpenCode
-      <a
-        class="compat-proxy-docs-link"
-        :href="ZEN_DOCS_URL"
-        v-tooltip="'Zen 免费模型文档（浏览器打开）'"
-        @click.prevent="openDocsUrl(ZEN_DOCS_URL)"
-        >Zen 免费模型</a
-      >）；仅支持 Responses
-      协议的上游按原协议直接转发，此时回合助推等翻译能力不适用
+      兼容上游；仅支持 Responses
+      协议的上游按原协议直接转发，此时回合助推等翻译能力不适用。本代理只提供通用协议转换，
+      不包含第三方客户端身份仿真与免费层专用兼容
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
@@ -168,7 +158,10 @@ onBeforeUnmount(refresh);
               }}
             </span>
             <code
-              v-if="store.settings.compat_proxy_enabled ?? false"
+              v-if="
+                (store.settings.compat_proxy_enabled ?? false) &&
+                localBaseUrlHint
+              "
               class="compat-proxy-base-url-capsule"
               role="button"
               tabindex="0"
@@ -213,7 +206,7 @@ onBeforeUnmount(refresh);
             type="text"
             class="compat-proxy-url-input"
             :value="apiUrlInput"
-            placeholder="https://opencode.ai/inference/openai/v1"
+            placeholder="https://your-provider.example/v1"
             @input="apiUrlInput = ($event.target as HTMLInputElement).value"
           />
         </div>
@@ -227,19 +220,6 @@ onBeforeUnmount(refresh);
             />
             <label for="compat-proxy-nudge">
               回合收尾约束和助推（模型空转收尾时自动续跑）
-            </label>
-          </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="checkbox-row compat-proxy-checkbox-row">
-            <input
-              id="compat-proxy-identity"
-              v-model="identityEnabled"
-              type="checkbox"
-            />
-            <label for="compat-proxy-identity">
-              OpenCode 客户端身份（补齐 2.1.4 请求头、工具集与 TLS 指纹）
             </label>
           </div>
         </div>
@@ -302,16 +282,6 @@ onBeforeUnmount(refresh);
   outline: none;
   border-color: var(--accent-dim);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
-}
-.compat-proxy-docs-link {
-  color: var(--accent);
-  text-decoration: none;
-  cursor: pointer;
-  user-select: text;
-}
-.compat-proxy-docs-link:hover {
-  color: var(--accent-dim);
-  text-decoration: underline;
 }
 .compat-proxy-port-input {
   width: 100%;

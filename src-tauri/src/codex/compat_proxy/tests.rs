@@ -2,6 +2,7 @@
 
 use super::test_support::*;
 use super::*;
+use axum::http::HeaderValue;
 
 // ---------- 口嗨检测：纯函数与分会话计数 ----------
 
@@ -241,7 +242,7 @@ fn request_header_thread_id_normalizes_client_value() {
         request_header_thread_id(&session_headers("01a0aaf8-abc")).as_deref(),
         Some("01a0aaf8-abc")
     );
-    // 客户端已带前缀：去掉前缀后查登记表（与 SessionMap 的 key 归一化同一口径）
+    // 客户端已带前缀：去掉前缀后查模式登记表。
     assert_eq!(
         request_header_thread_id(&session_headers("ses_abc")).as_deref(),
         Some("abc")
@@ -959,9 +960,50 @@ fn normalize_base_url_trims_whitespace_and_trailing_slashes() {
         normalize_base_url("  https://a/zen/v2/  "),
         "https://a/zen/v2"
     );
-    assert_eq!(normalize_base_url(""), DEFAULT_COMPAT_BASE_URL);
-    assert_eq!(normalize_base_url("   "), DEFAULT_COMPAT_BASE_URL);
-    assert_eq!(normalize_base_url("/"), DEFAULT_COMPAT_BASE_URL);
+    assert_eq!(normalize_base_url(""), "");
+    assert_eq!(normalize_base_url("   "), "");
+    assert_eq!(normalize_base_url("/"), "");
+}
+
+#[test]
+fn compat_proxy_config_restarts_on_port_upstream_or_nudge_change() {
+    let base = CompatProxyConfig::new(18080, " https://api.example.com/v1/ ", true);
+    assert!(base.matches(&CompatProxyConfig::new(
+        18080,
+        "https://api.example.com/v1",
+        true
+    )));
+    assert!(!base.matches(&CompatProxyConfig::new(
+        18081,
+        "https://api.example.com/v1",
+        true
+    )));
+    assert!(!base.matches(&CompatProxyConfig::new(
+        18080,
+        "https://other.example.com/v1",
+        true
+    )));
+    assert!(!base.matches(&CompatProxyConfig::new(
+        18080,
+        "https://api.example.com/v1",
+        false
+    )));
+}
+
+#[tokio::test]
+async fn start_rejects_empty_base_url() {
+    let result = start(
+        CompatProxyConfig::new(18080, "   ", true),
+        None,
+        TraceSink::disabled(),
+        Arc::new(ThreadModeRegistry::default()),
+    )
+    .await;
+    let err = match result {
+        Ok(_) => panic!("空上游地址不得启动代理"),
+        Err(err) => err,
+    };
+    assert!(err.contains("未配置上游 base_url"), "{err}");
 }
 
 #[test]
@@ -977,8 +1019,8 @@ fn responses_path_follows_base_url_path() {
         "/zen/v2/responses"
     );
     assert_eq!(responses_path("https://a/v1"), "/v1/responses");
-    // 空/非法地址回退默认上游，派生出默认路径。
-    assert_eq!(responses_path(""), responses_path(DEFAULT_COMPAT_BASE_URL));
+    // 空/非法地址没有默认上游，只派生入口路径。
+    assert_eq!(responses_path(""), "/responses");
 }
 
 #[test]
@@ -1872,145 +1914,6 @@ fn sse_line_parsing_handles_done_and_data() {
 }
 
 #[test]
-fn opencode_id_matches_opencode_format() {
-    // 前缀 + 26 位：前 12 位是时间戳低 6 字节的小写十六进制（opencode 规则），
-    // 后 14 位是 0-9A-Za-z；Zen 服务端就是这么要求的，不合形状会被判成非 opencode 客户端
-    for (id, prefix) in [
-        (opencode_id("msg", false), "msg_"),
-        (opencode_id("ses", true), "ses_"),
-    ] {
-        let body = id.strip_prefix(prefix).expect("前缀应完整保留");
-        assert_eq!(body.len(), 26, "{id}");
-        assert!(
-            body[..12]
-                .chars()
-                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
-            "前 12 位应是小写十六进制：{id}"
-        );
-        assert!(
-            body.chars().all(|c| c.is_ascii_alphanumeric()),
-            "后段只允许 0-9A-Za-z：{id}"
-        );
-    }
-    // 同一毫秒内连续铸号也必须不同（毫秒内计数器参与取值）
-    assert_ne!(opencode_id("msg", false), opencode_id("msg", false));
-    // 升序与降序是同一时间戳的互补取值：首字节必然不同（会话用降序、消息用升序）
-    let ascending = opencode_id("x", false);
-    let descending = opencode_id("x", true);
-    assert_ne!(&ascending[2..14], &descending[2..14]);
-}
-
-#[test]
-fn opencode_session_maps_client_header_to_stable_id() {
-    let state = test_proxy_state(
-        "ses_fixed123",
-        "http://127.0.0.1:1",
-        None,
-        TraceSink::disabled(),
-    );
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "session-id",
-        HeaderValue::from_static("3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"),
-    );
-    // UUID 形状的 codex 线程 id 不再直接贴进头里，而是映射成合法 opencode 会话标识
-    let session = opencode_session(&state, &headers);
-    assert_is_opencode_id(&session, "ses");
-    // 同一 codex 线程恒定
-    assert_eq!(opencode_session(&state, &headers), session);
-    // 反查能找回原始 codex 线程 id
-    assert_eq!(
-        state.session_map.codex_of(&session).as_deref(),
-        Some("3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8")
-    );
-
-    // 另一个线程 → 另一个会话 id
-    let mut other = HeaderMap::new();
-    other.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-    assert_ne!(opencode_session(&state, &other), session);
-
-    // 前后空白与 `ses_` 前缀归一化到同一条映射
-    let mut prefixed = HeaderMap::new();
-    prefixed.insert(
-        "session-id",
-        HeaderValue::from_static(" ses_3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8 "),
-    );
-    assert_eq!(opencode_session(&state, &prefixed), session);
-
-    // 缺失 / 纯空白 / 非可见 ASCII：回落到代理级稳定会话，且查不到对应线程
-    assert_eq!(opencode_session(&state, &HeaderMap::new()), "ses_fixed123");
-    let mut blank = HeaderMap::new();
-    blank.insert("session-id", HeaderValue::from_static("   "));
-    assert_eq!(opencode_session(&state, &blank), "ses_fixed123");
-    let mut invalid = HeaderMap::new();
-    invalid.insert("session-id", HeaderValue::from_bytes(b"caf\xe9").unwrap());
-    assert_eq!(opencode_session(&state, &invalid), "ses_fixed123");
-    assert_eq!(state.session_map.codex_of("ses_fixed123"), None);
-}
-
-#[test]
-fn session_map_is_deterministic_and_reversible() {
-    let map = SessionMap::default();
-    let a = map.resolve("thread-a").expect("应铸出会话 id");
-    let b = map.resolve("thread-b").expect("应铸出会话 id");
-    assert_is_opencode_id(&a, "ses");
-    assert_is_opencode_id(&b, "ses");
-    assert_ne!(a, b);
-    // 同 key 恒定、双向可查
-    assert_eq!(map.resolve("thread-a").as_deref(), Some(a.as_str()));
-    assert_eq!(map.codex_of(&a).as_deref(), Some("thread-a"));
-    assert_eq!(map.codex_of(&b).as_deref(), Some("thread-b"));
-    assert_eq!(map.codex_of("ses_unknown"), None);
-}
-
-#[test]
-fn session_map_normalizes_key_and_ignores_blank() {
-    let map = SessionMap::default();
-    let a = map.resolve("thread-a").expect("应铸出会话 id");
-    // trim + 剥 `ses_` 前缀后落到同一条映射
-    assert_eq!(map.resolve("  ses_thread-a  ").as_deref(), Some(a.as_str()));
-    assert!(map.resolve("   ").is_none());
-    assert!(map.resolve("ses_").is_none());
-}
-
-#[test]
-fn session_map_clears_when_full() {
-    let map = SessionMap::default();
-    let keep = map.resolve("thread-0").expect("应铸出会话 id");
-    for index in 1..SESSION_MAP_LIMIT {
-        map.resolve(&format!("thread-{index}"))
-            .expect("应铸出会话 id");
-    }
-    assert_eq!(map.codex_of(&keep).as_deref(), Some("thread-0"));
-    // 超出上限：整体清空后插入（与 ThreadModeRegistry 同一取舍）
-    let overflow = map.resolve("thread-overflow").expect("应铸出会话 id");
-    assert_eq!(map.codex_of(&overflow).as_deref(), Some("thread-overflow"));
-    assert_eq!(map.codex_of(&keep), None);
-}
-
-#[test]
-fn session_map_remints_when_id_collides() {
-    let map = SessionMap::default();
-    let taken = map.resolve("thread-a").expect("应铸出会话 id");
-    let mut calls = 0usize;
-    let other = map
-        .resolve_with("thread-b", || {
-            calls += 1;
-            if calls <= 2 {
-                taken.clone()
-            } else {
-                "ses_fresh".to_string()
-            }
-        })
-        .expect("应铸出会话 id");
-    assert_eq!(other, "ses_fresh");
-    assert_eq!(calls, 3, "前两次撞号应重铸");
-    // 撞号重铸不影响原会话的映射
-    assert_eq!(map.codex_of(&taken).as_deref(), Some("thread-a"));
-    assert_eq!(map.resolve("thread-a").as_deref(), Some(taken.as_str()));
-}
-
-#[test]
 fn log_at_writes_safe_events_to_session_log() {
     let dir = tempfile::TempDir::new().unwrap();
     let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
@@ -2491,426 +2394,6 @@ fn tool_choice_converts_only_known_shapes() {
     assert_eq!(tool_choice_to_chat(None), None);
 }
 
-// ---------- Zen 免费层请求体门禁：形状补丁 ----------
-
-/// 请求体门禁补丁的开关**只看**「OpenCode 客户端身份」这一项：开即补（无论上游
-/// host 是 opencode、DeepSeek 还是回环地址），关即不补；收尾开关不影响它。
-#[test]
-fn zen_body_patch_follows_identity_switch_only() {
-    // 上游地址（含 Zen / 第三方 / 回环 / 非法）不参与判据，只有身份开关决定是否补形状
-    for base_url in [
-        "https://opencode.ai/zen/v1",
-        "https://api.deepseek.com/v1",
-        "http://127.0.0.1:18080/zen/v1",
-        "not-a-url",
-        "",
-    ] {
-        assert!(
-            CompatProxyConfig::new(18080, base_url, true, true).opencode_identity,
-            "身份开启即补形状（不看上游）：{base_url}"
-        );
-        assert!(
-            !CompatProxyConfig::new(18080, base_url, false, true).opencode_identity,
-            "身份关闭即不补形状：{base_url}"
-        );
-    }
-    // 收尾开关是另一个独立维度：它不参与「补不补形状」
-    assert!(
-        CompatProxyConfig::new(18080, "https://opencode.ai/zen/v1", true, false).opencode_identity
-    );
-}
-
-/// 身份开关落地到请求头：开时发 OpenCode 2.1.4 的完整识别头；关时一个识别头都不发，
-/// 并把入站自带的同名头剔除、UA 透传入站值。
-#[test]
-fn opencode_identity_headers_follow_the_switch() {
-    let mut inbound = HeaderMap::new();
-    inbound.insert(header::USER_AGENT, HeaderValue::from_static("codex/1.2.3"));
-    // 恶意/异常客户端自带识别头：关闭时必须被剔除
-    inbound.insert(
-        "x-opencode-session",
-        HeaderValue::from_static("ses_attacker_supplied"),
-    );
-
-    let on = test_proxy_state(
-        "ses_fixed123",
-        "https://opencode.ai/zen/v1",
-        None,
-        TraceSink::disabled(),
-    );
-    let mapped_session = on
-        .session_map
-        .resolve("thread-project-test")
-        .expect("线程会话 id");
-    on.projects.record("thread-project-test", "a".repeat(40));
-    let mut out = HeaderMap::new();
-    apply_opencode_identity(&mut out, &inbound, &on, &mapped_session, "msg_fixed");
-    assert_eq!(out.get("x-opencode-client").unwrap(), OPENCODE_CLIENT);
-    let project = out
-        .get("x-opencode-project")
-        .expect("必须发送项目 id")
-        .to_str()
-        .unwrap();
-    assert_eq!(project, "a".repeat(40), "应使用线程登记的项目 id");
-    assert_eq!(out.get("x-opencode-session").unwrap(), &mapped_session);
-    assert_eq!(out.get("x-opencode-session-id").unwrap(), &mapped_session);
-    assert_eq!(out.get("x-session-affinity").unwrap(), &mapped_session);
-    assert_eq!(out.get("x-session-id").unwrap(), &mapped_session);
-    assert!(out.get("x-opencode-request").is_none());
-    assert_eq!(out.get(header::USER_AGENT).unwrap(), ZEN_USER_AGENT);
-    assert_eq!(out.get(header::ACCEPT).unwrap(), "*/*");
-    assert_eq!(out.get(header::ACCEPT_ENCODING).unwrap(), "gzip, deflate");
-    assert_eq!(out.get(header::CONNECTION).unwrap(), "keep-alive");
-    assert_eq!(ZEN_USER_AGENT, "opencode/latest/2.1.4/desktop");
-
-    let b3 = out.get("b3").expect("必须发送 b3").to_str().unwrap();
-    let traceparent = out
-        .get("traceparent")
-        .expect("必须发送 traceparent")
-        .to_str()
-        .unwrap();
-    let parts: Vec<&str> = b3.split('-').collect();
-    assert_eq!(parts.len(), 4, "b3 形状不合法：{b3}");
-    assert_eq!(parts[0].len(), 32);
-    assert_eq!(parts[1].len(), 16);
-    assert_eq!(parts[2], "1");
-    assert_eq!(parts[3].len(), 16);
-    assert_eq!(traceparent, format!("00-{}-{}-01", parts[0], parts[1]));
-
-    let mut off = test_proxy_state(
-        "ses_fixed123",
-        "https://opencode.ai/zen/v1",
-        None,
-        TraceSink::disabled(),
-    );
-    off.opencode_identity = false;
-    let mut out = HeaderMap::new();
-    apply_opencode_identity(&mut out, &inbound, &off, "ses_fixed123", "msg_fixed");
-    for name in OPENCODE_IDENTITY_HEADERS {
-        assert!(out.get(name).is_none(), "关闭时不应发 {name}");
-    }
-    assert_eq!(
-        out.get(header::USER_AGENT).unwrap(),
-        "codex/1.2.3",
-        "关闭时 UA 应透传入站值"
-    );
-
-    // 入站没有 UA 时关闭态不带 UA（客户端本身也不再设默认 UA）
-    let mut out = HeaderMap::new();
-    apply_opencode_identity(
-        &mut out,
-        &HeaderMap::new(),
-        &off,
-        "ses_fixed123",
-        "msg_fixed",
-    );
-    assert!(out.get(header::USER_AGENT).is_none());
-}
-
-#[test]
-fn patch_zen_request_body_appends_missing_required_tools() {
-    // 原本没有 tools：数组只含 6 个假工具，形状逐字可核对
-    let mut body = json!({ "model": "m", "messages": [], "stream": true });
-    patch_zen_request_body(&mut body);
-    let tools = body["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), ZEN_REQUIRED_TOOL_NAMES.len());
-    for (tool, name) in tools.iter().zip(ZEN_REQUIRED_TOOL_NAMES) {
-        assert_eq!(tool["type"], "function");
-        assert_eq!(tool["function"]["name"], name);
-        assert_eq!(tool["function"]["description"], ZEN_FAKE_TOOL_DESCRIPTION);
-        assert_eq!(tool["function"]["parameters"], zen_tool_parameters(name));
-        // 门禁要求 properties 非空（见 ZEN_MIN_GATE_TOOLS）：逐条兜一道
-        let properties = tool["function"]["parameters"]["properties"]
-            .as_object()
-            .unwrap_or_else(|| panic!("假工具必须带对象形态的 properties：{tool}"));
-        assert!(
-            !properties.is_empty(),
-            "假工具 properties 不能为空（否则不计入门禁）：{tool}"
-        );
-    }
-    // 6 个合格工具 ≥ 门禁下限（上游据此判定「像 opencode 客户端」）
-    assert_eq!(count_gate_tools(&body), ZEN_REQUIRED_TOOL_NAMES.len());
-    // 6 个工具全部追加 → 教学并入 messages：原本没有 system 消息，新建一条放在最前
-    assert_eq!(body["messages"][0]["role"], "system");
-    let inst = body["messages"][0]["content"].as_str().unwrap().to_string();
-    assert!(
-        inst.contains("bash、edit、glob、grep、read、write"),
-        "教学应列出全部 6 个工具：{inst}"
-    );
-    assert!(
-        body.get("instructions").is_none(),
-        "chat 体不应出现顶层 instructions：{body}"
-    );
-    // 幂等：再调用一次不叠加
-    patch_zen_request_body(&mut body);
-    assert_eq!(
-        body["tools"].as_array().unwrap().len(),
-        ZEN_REQUIRED_TOOL_NAMES.len()
-    );
-    // 幂等：不新增消息、教学不重复追加
-    assert_eq!(
-        body["messages"].as_array().unwrap().len(),
-        1,
-        "幂等调用不应新增消息：{body}"
-    );
-    assert_eq!(body["messages"][0]["content"].as_str().unwrap(), &inst);
-
-    // 已有工具：真实工具保留且顺序不变、同名时以客户端声明为准，只补缺失的名字
-    let mut body = json!({
-        "messages": [],
-        "tools": [
-            { "type": "function", "function": {
-                "name": "shell", "description": "真实工具" } },
-            { "type": "function", "function": {
-                "name": "codexui_glob", "description": "命名空间扁平名" } },
-            { "type": "function", "function": {
-                "name": "bash", "description": "客户端自己的 bash" } }
-        ]
-    });
-    patch_zen_request_body(&mut body);
-    let tools = body["tools"].as_array().unwrap();
-    let names: Vec<&str> = tools
-        .iter()
-        .map(|tool| tool["function"]["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        names,
-        vec![
-            "shell",
-            "codexui_glob",
-            "bash",
-            "edit",
-            "glob",
-            "grep",
-            "read",
-            "write"
-        ],
-        "真实工具在前、缺失的假工具按固定顺序追加在后"
-    );
-    assert_eq!(tools[2]["function"]["description"], "客户端自己的 bash");
-    // bash 已存在不追加 → 教学只列 edit/glob/grep/read/write
-    let inst = body["messages"][0]["content"].as_str().unwrap();
-    assert!(
-        inst.contains("edit、glob、grep、read、write"),
-        "教学应列出 5 个缺失工具：{inst}"
-    );
-    assert!(
-        !inst.contains("bash、edit"),
-        "教学不应重复列出 bash：{inst}"
-    );
-}
-
-#[test]
-fn zen_tool_schemas_cover_gate_names_with_non_empty_properties() {
-    // 资源文件必须恰好覆盖 6 个门禁工具名，且每个 schema 的 properties 非空 —— 任一缺失
-    // 都会让补丁产出的工具不计入门禁（上游 403），故在这里钉死。
-    let schemas: Value = serde_json::from_str(ZEN_TOOL_SCHEMAS_JSON).expect("资源必须是合法 JSON");
-    let schemas = schemas.as_object().expect("资源顶层必须是对象");
-    assert_eq!(
-        schemas.len(),
-        ZEN_REQUIRED_TOOL_NAMES.len(),
-        "资源应恰好覆盖 6 个门禁工具：{:?}",
-        schemas.keys().collect::<Vec<_>>()
-    );
-    for name in ZEN_REQUIRED_TOOL_NAMES {
-        let schema = schemas
-            .get(name)
-            .unwrap_or_else(|| panic!("资源缺 {name} 的 parameters"));
-        let properties = schema["properties"]
-            .as_object()
-            .unwrap_or_else(|| panic!("{name} 的 properties 必须是对象：{schema}"));
-        assert!(!properties.is_empty(), "{name} 的 properties 不能为空");
-    }
-    // 逐个核对真实报文的代表字段（防以后手改资源时写错结构）
-    assert_eq!(zen_tool_parameters("bash")["required"], json!(["command"]));
-    assert!(zen_tool_parameters("bash")["properties"]["workdir"].is_object());
-    assert!(zen_tool_parameters("read")["properties"]["offset"].is_object());
-    assert!(zen_tool_parameters("write")["properties"]["content"].is_object());
-}
-
-#[test]
-fn count_gate_tools_follows_upstream_gate_rule() {
-    let tool = |name: &str, parameters: Value| json!({ "type": "function", "function": { "name": name, "parameters": parameters } });
-    let empty = json!({ "type": "object", "properties": {} });
-    let dummy = json!({ "type": "object", "properties": { "x": { "type": "string" } } });
-    let no_properties = json!({ "type": "object" });
-
-    // 空 properties / 缺 properties 都不算合格（现有实现的坑就在这）
-    assert_eq!(
-        count_gate_tools(&json!({ "tools": [
-            tool("bash", empty.clone()), tool("edit", no_properties.clone()),
-            tool("glob", empty.clone()), tool("grep", empty.clone()),
-            tool("read", empty.clone()), tool("write", empty.clone())
-        ] })),
-        0
-    );
-    // 名字不在门禁名单里（task 等其它内置名、foo1 这类杂名）一律不计
-    assert_eq!(
-        count_gate_tools(&json!({ "tools": [
-            tool("task", dummy.clone()), tool("todowrite", dummy.clone()),
-            tool("webfetch", dummy.clone()), tool("websearch", dummy.clone()),
-            tool("foo1", dummy.clone())
-        ] })),
-        0
-    );
-    // 4 个合格不够（实测 4 个仍 403）、非门禁名不凑数
-    assert_eq!(
-        count_gate_tools(&json!({ "tools": [
-            tool("bash", dummy.clone()), tool("edit", dummy.clone()),
-            tool("glob", dummy.clone()), tool("grep", dummy.clone()),
-            tool("foo1", dummy.clone())
-        ] })),
-        4
-    );
-    // 5~6 个合格 = 达到下限
-    let five = json!({ "tools": [
-        tool("bash", dummy.clone()), tool("edit", dummy.clone()),
-        tool("glob", dummy.clone()), tool("grep", dummy.clone()),
-        tool("read", dummy.clone())
-    ] });
-    assert_eq!(count_gate_tools(&five), ZEN_MIN_GATE_TOOLS);
-    assert_eq!(
-        count_gate_tools(&json!({ "tools": [
-            tool("bash", dummy.clone()), tool("edit", dummy.clone()),
-            tool("glob", dummy.clone()), tool("grep", dummy.clone()),
-            tool("read", dummy.clone()), tool("write", dummy.clone())
-        ] })),
-        ZEN_REQUIRED_TOOL_NAMES.len()
-    );
-    // 没有 tools / tools 不是数组：0
-    assert_eq!(count_gate_tools(&json!({ "model": "m" })), 0);
-    assert_eq!(count_gate_tools(&json!({ "tools": {} })), 0);
-}
-
-#[test]
-fn fake_tools_instruction_returns_none_for_empty_list() {
-    assert!(fake_tools_instruction(&[]).is_none());
-}
-
-#[test]
-fn fake_tools_instruction_lists_only_added_tools() {
-    let text = fake_tools_instruction(&["edit", "glob"]).unwrap();
-    assert!(text.contains("edit、glob"), "应列出指定工具：{text}");
-    assert!(!text.contains("bash"), "不应含未追加工具：{text}");
-    assert!(!text.contains("grep"), "不应含未追加工具：{text}");
-}
-
-#[test]
-fn patch_zen_request_body_appends_teaching_to_existing_system_message() {
-    // 真实形状：入站 instructions 已被 responses_to_chat 翻成首条 system 消息
-    let mut body = json!({
-        "model": "m",
-        "messages": [{ "role": "system", "content": "原有教学内容" }],
-        "stream": true
-    });
-    patch_zen_request_body(&mut body);
-    let messages = body["messages"].as_array().unwrap();
-    assert_eq!(
-        messages.len(),
-        1,
-        "应并入已有 system 消息、不新增消息：{body}"
-    );
-    let inst = messages[0]["content"].as_str().unwrap();
-    assert!(
-        inst.starts_with("原有教学内容"),
-        "应保留原有 system 文本前缀：{inst}"
-    );
-    assert!(inst.contains("弃用工具声明"), "应追加弃用教学：{inst}");
-    assert!(
-        inst.contains("原有教学内容\n\n"),
-        "原文本与教学之间应有一个空行分隔：{inst}"
-    );
-    assert!(
-        body.get("instructions").is_none(),
-        "chat 体不应出现顶层 instructions：{body}"
-    );
-}
-
-#[test]
-fn patch_zen_request_body_idempotent_instructions() {
-    let mut body = json!({ "model": "m", "messages": [], "stream": true });
-    patch_zen_request_body(&mut body);
-    let first = body["messages"][0]["content"].as_str().unwrap().to_string();
-    patch_zen_request_body(&mut body);
-    assert_eq!(
-        body["messages"].as_array().unwrap().len(),
-        1,
-        "幂等调用不应新增消息：{body}"
-    );
-    let second = body["messages"][0]["content"].as_str().unwrap();
-    assert_eq!(first, second, "幂等调用不应重复追加教学");
-}
-
-#[test]
-fn patch_zen_request_body_inserts_system_message_before_user_message() {
-    // 没有 system 消息（如非流式、无 instructions 的请求）：教学另起一条放在最前
-    let mut body = json!({
-        "model": "m",
-        "messages": [{ "role": "user", "content": "hi" }],
-        "stream": true
-    });
-    patch_zen_request_body(&mut body);
-    let messages = body["messages"].as_array().unwrap();
-    assert_eq!(
-        messages.len(),
-        2,
-        "应插一条 system 消息、不动原有消息：{body}"
-    );
-    assert_eq!(messages[0]["role"], "system");
-    assert!(messages[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("弃用工具声明"));
-    assert_eq!(messages[1]["role"], "user");
-    assert_eq!(messages[1]["content"], "hi");
-}
-
-#[test]
-fn patch_zen_request_body_inserts_when_leading_system_content_is_not_text() {
-    // 首条 system 的 content 不是字符串（分片形态）：不合并，另插一条 system 消息
-    let mut body = json!({
-        "model": "m",
-        "messages": [{ "role": "system", "content": [{ "type": "text", "text": "分段" }] }],
-    });
-    patch_zen_request_body(&mut body);
-    let messages = body["messages"].as_array().unwrap();
-    assert_eq!(
-        messages.len(),
-        2,
-        "分片 system 消息无法追加，应另插一条：{body}"
-    );
-    assert_eq!(messages[0]["role"], "system");
-    assert!(messages[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("弃用工具声明"));
-    assert!(messages[1]["content"].is_array(), "原有分片消息应逐字保留");
-}
-
-#[test]
-fn zen_max_tokens_field_follows_client_budget() {
-    // 入站没有自己的输出预算 → 补 ZEN_MAX_TOKENS，且错误体点名 max_tokens 时会被摘掉重试
-    let field = zen_max_tokens_field(&json!({ "model": "m", "input": "hi" }))
-        .expect("无 max_output_tokens 时应补 max_tokens");
-    assert_eq!(field.key, "max_tokens");
-    assert_eq!(field.value, json!(ZEN_MAX_TOKENS));
-    assert!(mentions_field(
-        r#"{"error":{"message":"Invalid max_tokens: too large"}}"#,
-        field.needles
-    ));
-    // null 与缺失同口径
-    assert!(zen_max_tokens_field(&json!({ "max_output_tokens": null })).is_some());
-    // 客户端显式给了预算：尊重它，不补 ZEN_MAX_TOKENS
-    assert!(zen_max_tokens_field(&json!({ "max_output_tokens": 100 })).is_none());
-    let req = json!({
-        "model": "m",
-        "input": "hi",
-        "max_output_tokens": 100
-    });
-    let (chat, _) = responses_to_chat(&req, false, false).unwrap();
-    assert_eq!(chat["max_tokens"], 100, "客户端预算仍按原样映射");
-}
-
 #[test]
 fn message_images_become_chat_content_parts() {
     let req = json!({
@@ -3243,131 +2726,8 @@ fn protocol_markers_match_only_the_upstream_protocol_error() {
 }
 
 #[test]
-fn patch_responses_gate_adds_enough_gate_tools_and_merges_instructions() {
-    let mut body = json!({
-        "model": "m",
-        "instructions": "原有指令",
-        "input": [{ "role": "user", "content": "hi" }],
-        "tools": [
-            { "type": "function", "name": "shell",
-              "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } } } },
-            { "type": "namespace", "name": "codexui", "tools": [] }
-        ],
-        "store": false
-    });
-    patch_responses_gate(&mut body);
-    // 补出来的是 Responses 形状：名字与 parameters 在顶层、带 strict:false、描述是弃用文案
-    let tools = body["tools"].as_array().unwrap();
-    assert_eq!(
-        tools.len(),
-        2 + ZEN_REQUIRED_TOOL_NAMES.len(),
-        "只追加缺失的 6 个名字：{body}"
-    );
-    for (tool, name) in tools[2..].iter().zip(ZEN_REQUIRED_TOOL_NAMES) {
-        assert_eq!(tool["type"], "function");
-        assert_eq!(tool["name"], name);
-        assert_eq!(tool["description"], ZEN_FAKE_TOOL_DESCRIPTION);
-        assert_eq!(tool["strict"], false);
-        assert_eq!(tool["parameters"], zen_tool_parameters(name));
-        assert!(tool["parameters"]["properties"]
-            .as_object()
-            .is_some_and(|properties| !properties.is_empty()));
-    }
-    assert!(count_gate_tools(&body) >= ZEN_MIN_GATE_TOOLS);
-    // 客户端已有的工具与其余字段一个都不动
-    assert_eq!(tools[0]["name"], "shell");
-    assert_eq!(tools[1]["type"], "namespace");
-    assert_eq!(body["store"], false);
-    assert_eq!(body["input"][0]["content"], "hi");
-    // 教学并入 instructions 末尾，原有内容仍是前缀
-    let instructions = body["instructions"].as_str().unwrap();
-    assert!(instructions.starts_with("原有指令\n\n"), "{instructions}");
-    assert!(instructions.contains("弃用工具声明"), "{instructions}");
-    assert!(
-        instructions.contains("bash、edit、glob、grep、read、write"),
-        "{instructions}"
-    );
-    // 幂等：重复调用不叠加工具、不重复追加教学
-    let once = body.clone();
-    patch_responses_gate(&mut body);
-    assert_eq!(body, once);
-}
-
-#[test]
-fn patch_responses_gate_keeps_client_declared_names_and_creates_instructions() {
-    // 客户端已声明 6 个同名工具（带非空 schema）→ 一个都不补、不写教学
-    let tools: Vec<Value> = ZEN_REQUIRED_TOOL_NAMES
-        .iter()
-        .map(|name| {
-            json!({
-                "type": "function", "name": name,
-                "parameters": { "type": "object", "properties": { "x": { "type": "string" } } }
-            })
-        })
-        .collect();
-    let mut body = json!({ "model": "m", "tools": tools });
-    patch_responses_gate(&mut body);
-    assert_eq!(
-        body["tools"].as_array().unwrap().len(),
-        ZEN_REQUIRED_TOOL_NAMES.len()
-    );
-    assert!(
-        body.get("instructions").is_none(),
-        "没补工具就不该写教学：{body}"
-    );
-    assert_eq!(count_gate_tools(&body), ZEN_REQUIRED_TOOL_NAMES.len());
-
-    // 只缺一个 → 只补一个，教学只列这一个；没有 instructions 时新建
-    let mut body = json!({
-        "model": "m",
-        "tools": [{ "type": "function", "name": "bash",
-                    "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } }]
-    });
-    patch_responses_gate(&mut body);
-    let names: Vec<&str> = body["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(names.len(), ZEN_REQUIRED_TOOL_NAMES.len(), "{names:?}");
-    let instructions = body["instructions"].as_str().unwrap();
-    assert!(
-        instructions.contains("edit、glob、grep、read、write"),
-        "{instructions}"
-    );
-    assert!(
-        !instructions.contains("bash、edit"),
-        "教学不应重复列出已存在的 bash：{instructions}"
-    );
-}
-
-#[test]
-fn count_gate_tools_accepts_both_tool_shapes() {
-    // chat 形状（function 包装）与 Responses 形状（顶层）都算数，混用也对；
-    // 空 properties / 缺 properties 一律不计
-    let body = json!({ "tools": [
-        { "type": "function", "function": { "name": "bash",
-          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } } },
-        { "type": "function", "name": "edit",
-          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } },
-        { "type": "function", "name": "glob",
-          "parameters": { "type": "object", "properties": {} } },
-        { "type": "function", "name": "grep", "parameters": { "type": "object" } },
-        { "type": "function", "name": "read",
-          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } }
-    ] });
-    assert_eq!(count_gate_tools(&body), 3, "{body}");
-}
-
-#[test]
 fn protocol_cache_learns_per_model() {
-    let state = test_proxy_state(
-        "ses_test",
-        "http://127.0.0.1:1/v1",
-        None,
-        TraceSink::disabled(),
-    );
+    let state = test_proxy_state("http://127.0.0.1:1/v1", None, TraceSink::disabled());
     // 默认 chat（reason=default）
     assert_eq!(resolve_protocol(&state, Some("m1")).0, ModelProtocol::Chat);
     assert_eq!(resolve_protocol(&state, Some("m1")).1, "default");

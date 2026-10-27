@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const mockOpenDocsUrl = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/links", () => ({ openDocsUrl: mockOpenDocsUrl }));
 const mockCopyText = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../../lib/clipboard", () => ({ copyText: mockCopyText }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -20,7 +18,6 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 });
 
 import CompatProxySection from "../settings/CompatProxySection.vue";
-import { tooltipDirective } from "../../directives/tooltip";
 import { store } from "../../composables/useCodex";
 import {
   applyCompatProxy,
@@ -33,13 +30,9 @@ const mockedApply = vi.mocked(applyCompatProxy);
 const mockedRead = vi.mocked(readCompatProxyStatus);
 const mockedToggle = vi.mocked(toggleCompatProxy);
 const mockedToast = vi.mocked(setToast);
-const ZEN_DOCS_URL = "https://opencode.ai/zen";
 
 function mountSection() {
-  return mount(CompatProxySection, {
-    props: { active: true },
-    global: { directives: { tooltip: tooltipDirective } },
-  });
+  return mount(CompatProxySection, { props: { active: true } });
 }
 
 describe("CompatProxySection", () => {
@@ -48,11 +41,11 @@ describe("CompatProxySection", () => {
     mockedApply.mockClear();
     mockedToggle.mockClear();
     mockedToast.mockClear();
-    mockOpenDocsUrl.mockClear();
     mockCopyText.mockClear();
     mockCopyText.mockResolvedValue(true);
     // 用例间会互相污染：显式把代理开关复位为「未启用」
     store.settings.compat_proxy_enabled = false;
+    store.settings.compat_proxy_base_url = "";
   });
 
   it("渲染标题、说明与运行状态", async () => {
@@ -65,19 +58,16 @@ describe("CompatProxySection", () => {
     expect(wrapper.find(".compat-proxy-head-main h3").text()).toBe(
       "兼容代理服务",
     );
-    // 说明文案含 Responses，并点出默认上游是 OpenCode Zen（可换成任意兼容端点）
     expect(wrapper.text()).toContain("Responses");
-    expect(wrapper.text()).toContain("OpenCode Zen");
     expect(wrapper.text()).toContain("OpenAI 兼容上游");
+    expect(wrapper.text()).toContain("通用协议转换");
   });
 
-  it("顶部说明里的「Zen 免费模型」是文档链接", async () => {
+  it("不再展示客户端身份开关或旧文档链接", () => {
     const wrapper = mountSection();
-    const link = wrapper.find(".settings-section-desc .compat-proxy-docs-link");
-    expect(link.text()).toBe("Zen 免费模型");
-    expect(link.attributes("href")).toBe(ZEN_DOCS_URL);
-    await link.trigger("click");
-    expect(mockOpenDocsUrl).toHaveBeenCalledWith(ZEN_DOCS_URL);
+    expect(wrapper.find(".compat-proxy-docs-link").exists()).toBe(false);
+    expect(wrapper.find("#compat-proxy-identity").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("补齐 2.2.0 请求头");
   });
 
   it("接入配置框整块删除（含旧字段提示）", () => {
@@ -100,6 +90,7 @@ describe("CompatProxySection", () => {
 
   it("启用后显示「已启动」徽章与 base_url 胶囊", () => {
     store.settings.compat_proxy_enabled = true;
+    store.settings.compat_proxy_base_url = "https://api.example.com/v1";
     const wrapper = mountSection();
     const badge = wrapper.find(".compat-proxy-status-badge");
     expect(badge.text()).toBe("已启动");
@@ -107,23 +98,21 @@ describe("CompatProxySection", () => {
     expect(badge.classes()).toContain("badge-accent");
     const capsule = wrapper.find(".compat-proxy-base-url-capsule");
     expect(capsule.exists()).toBe(true);
-    expect(capsule.text()).toContain(
-      "http://127.0.0.1:18080/inference/openai/v1",
-    );
+    expect(capsule.text()).toContain("http://127.0.0.1:18080/v1");
   });
 
   it("点击胶囊复制 base_url 并提示", async () => {
     store.settings.compat_proxy_enabled = true;
+    store.settings.compat_proxy_base_url = "https://api.example.com/v1";
     const wrapper = mountSection();
     await wrapper.find(".compat-proxy-base-url-capsule").trigger("click");
-    expect(mockCopyText).toHaveBeenCalledWith(
-      "http://127.0.0.1:18080/inference/openai/v1",
-    );
+    expect(mockCopyText).toHaveBeenCalledWith("http://127.0.0.1:18080/v1");
     expect(mockedToast).toHaveBeenCalledWith("已复制 base_url");
   });
 
   it("复制失败时提示手动复制", async () => {
     store.settings.compat_proxy_enabled = true;
+    store.settings.compat_proxy_base_url = "https://api.example.com/v1";
     mockCopyText.mockResolvedValue(false);
     const wrapper = mountSection();
     await wrapper.find(".compat-proxy-base-url-capsule").trigger("click");
@@ -133,12 +122,11 @@ describe("CompatProxySection", () => {
   it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
     store.settings.compat_proxy_enabled = true;
     const wrapper = mountSection();
-    // 默认上游 → 本机地址 + 相同路径
     const value = () => wrapper.find(".compat-proxy-base-url-capsule");
-    expect(value().text()).toContain(
-      "http://127.0.0.1:18080/inference/openai/v1",
-    );
-    const urlInput = wrapper.find("input[type='text']");
+    expect(value().exists()).toBe(false);
+    const urlInput = wrapper.find(".compat-proxy-url-input");
+    await urlInput.setValue("https://api.example.com/v1");
+    expect(value().text()).toContain("http://127.0.0.1:18080/v1");
     await urlInput.setValue("https://api.deepseek.com/");
     expect(value().text()).toContain("http://127.0.0.1:18080");
     expect(value().text()).not.toContain("http://127.0.0.1:18080/zen");
@@ -153,28 +141,25 @@ describe("CompatProxySection", () => {
     expect(labels).not.toContain("转发目标地址");
   });
 
-  it("两个行为开关的文案为「名称（额外说明）」且默认勾选", () => {
+  it("收尾助推是唯一行为开关且默认勾选", () => {
     const wrapper = mountSection();
     const texts = wrapper
       .findAll(".compat-proxy-checkbox-row label")
       .map((l) => l.text());
+    expect(texts).toHaveLength(1);
     expect(texts[0]).toContain("回合收尾约束和助推");
     expect(texts[0]).toContain("模型空转收尾时自动续跑");
-    expect(texts[1]).toContain("OpenCode 客户端身份");
-    expect(texts[1]).toContain("补齐 2.1.4 请求头、工具集与 TLS 指纹");
-    // 身份开关不再按上游分流：括号说明里不该再出现「对 opencode 上游」这类前提
-    expect(texts[1]).not.toContain("opencode 上游");
     const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
-    expect(boxes).toHaveLength(2);
+    expect(boxes).toHaveLength(1);
     for (const box of boxes) {
       expect((box.element as HTMLInputElement).checked).toBe(true);
     }
   });
 
-  it("两个行为开关用的是左侧复选框，不再是右侧 switch", () => {
+  it("行为开关使用左侧复选框", () => {
     const wrapper = mountSection();
     const rows = wrapper.findAll(".compat-proxy-checkbox-row");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
     for (const row of rows) {
       const input = row.find("input[type='checkbox']");
       expect(input.exists()).toBe(true);
@@ -187,11 +172,13 @@ describe("CompatProxySection", () => {
     }
   });
 
-  it("保存时把两个行为开关当前值一并提交", async () => {
+  it("保存时提交地址与收尾助推值", async () => {
     const wrapper = mountSection();
+    await wrapper
+      .find(".compat-proxy-url-input")
+      .setValue("https://custom.example.com/v1");
     const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
     await boxes[0].setValue(false);
-    await boxes[1].setValue(false);
     const btn = wrapper
       .findAll("button")
       .find((b) => b.text().includes("保存"));
@@ -200,9 +187,8 @@ describe("CompatProxySection", () => {
       {
         enabled: false,
         port: 18080,
-        baseUrl: "https://opencode.ai/inference/openai/v1",
+        baseUrl: "https://custom.example.com/v1",
         nudgeEnabled: false,
-        identityEnabled: false,
       },
       true,
     );
@@ -221,20 +207,48 @@ describe("CompatProxySection", () => {
     expect(mockedApply).not.toHaveBeenCalled();
   });
 
-  it("开启开关时调用 toggleCompatProxy", async () => {
+  it("地址为空时拒绝开启代理", async () => {
     const wrapper = mountSection();
     const checkbox = wrapper.find(
       ".model-config-head-actions input[type='checkbox']",
     );
     await checkbox.setValue(true);
     await checkbox.trigger("change");
-    // 默认端口 18080 通过校验，默认 base_url
+    expect(mockedToggle).not.toHaveBeenCalled();
+    expect(mockedToast).toHaveBeenCalledWith("请先填写模型提供方的 base_url");
+  });
+
+  it("填写地址后开启开关调用 toggleCompatProxy", async () => {
+    const wrapper = mountSection();
+    await wrapper
+      .find(".compat-proxy-url-input")
+      .setValue("https://api.example.com/v1");
+    const checkbox = wrapper.find(
+      ".model-config-head-actions input[type='checkbox']",
+    );
+    await checkbox.setValue(true);
+    await checkbox.trigger("change");
     expect(mockedToggle).toHaveBeenCalledWith({
       enabled: true,
       port: 18080,
-      baseUrl: "https://opencode.ai/inference/openai/v1",
+      baseUrl: "https://api.example.com/v1",
       nudgeEnabled: true,
-      identityEnabled: true,
+    });
+  });
+
+  it("地址为空时仍允许关闭代理", async () => {
+    store.settings.compat_proxy_enabled = true;
+    const wrapper = mountSection();
+    const checkbox = wrapper.find(
+      ".model-config-head-actions input[type='checkbox']",
+    );
+    await checkbox.setValue(false);
+    await checkbox.trigger("change");
+    expect(mockedToggle).toHaveBeenCalledWith({
+      enabled: false,
+      port: 18080,
+      baseUrl: "",
+      nudgeEnabled: true,
     });
   });
 
@@ -242,7 +256,7 @@ describe("CompatProxySection", () => {
     const wrapper = mountSection();
     const input = wrapper.find("input[type='number']");
     await input.setValue("19090");
-    const urlInput = wrapper.find("input[type='text']");
+    const urlInput = wrapper.find(".compat-proxy-url-input");
     await urlInput.setValue("https://custom.example.com/v1");
     const btn = wrapper
       .findAll("button")
@@ -254,7 +268,6 @@ describe("CompatProxySection", () => {
         port: 19090,
         baseUrl: "https://custom.example.com/v1",
         nudgeEnabled: true,
-        identityEnabled: true,
       },
       true,
     );

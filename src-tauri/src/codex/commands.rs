@@ -101,16 +101,14 @@ pub async fn compat_proxy_apply(
     port: Option<u16>,
     base_url: Option<String>,
     nudge_enabled: Option<bool>,
-    opencode_identity_enabled: Option<bool>,
 ) -> Result<compat_proxy::CompatProxyStatus, String> {
     let current = server.compat_proxy_status().await;
     let port = port.unwrap_or(current.port);
-    let base_url = base_url.unwrap_or_else(|| compat_proxy::DEFAULT_COMPAT_BASE_URL.to_string());
-    // 两个行为开关缺省都按开启处理（与设置项默认值一致）
+    let base_url = base_url.unwrap_or_default();
+    // 收尾助推缺省开启（与设置项默认值一致）
     let nudge_enabled = nudge_enabled.unwrap_or(true);
-    let opencode_identity = opencode_identity_enabled.unwrap_or(true);
     Ok(server
-        .apply_compat_proxy(enabled, port, base_url, nudge_enabled, opencode_identity)
+        .apply_compat_proxy(enabled, port, base_url, nudge_enabled)
         .await)
 }
 

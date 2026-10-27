@@ -11,17 +11,14 @@ export interface CompatProxyStatus {
 }
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1";
 
-/** 应用本地代理所需的全部参数（两个行为开关缺省按开启）。 */
+/** 应用本地代理所需的全部参数。 */
 export interface CompatProxyOptions {
   enabled: boolean;
   port: number;
   baseUrl: string;
   /** 「回合收尾约束和助推」：空转收尾时自动续跑，默认开启 */
   nudgeEnabled?: boolean;
-  /** 「OpenCode 客户端身份」：识别头/UA、TLS 指纹 + 免费层门禁补丁（不分上游），默认开启 */
-  identityEnabled?: boolean;
 }
 
 /** 查询本地代理当前状态。 */
@@ -37,17 +34,14 @@ export async function applyCompatProxy(
 ): Promise<CompatProxyStatus> {
   const { enabled } = options;
   const targetPort = options.port > 0 ? options.port : DEFAULT_PORT;
-  const targetBaseUrl =
-    options.baseUrl.trim() === "" ? DEFAULT_BASE_URL : options.baseUrl.trim();
+  const targetBaseUrl = options.baseUrl.trim();
   const nudgeEnabled = options.nudgeEnabled ?? true;
-  const identityEnabled = options.identityEnabled ?? true;
   if (persist) {
     await saveSettings({
       compat_proxy_enabled: enabled,
       compat_proxy_port: targetPort,
       compat_proxy_base_url: targetBaseUrl,
       compat_proxy_nudge_enabled: nudgeEnabled,
-      compat_proxy_identity_enabled: identityEnabled,
     });
   }
   return invoke<CompatProxyStatus>("compat_proxy_apply", {
@@ -55,7 +49,6 @@ export async function applyCompatProxy(
     port: targetPort,
     baseUrl: targetBaseUrl,
     nudgeEnabled,
-    opencodeIdentityEnabled: identityEnabled,
   });
 }
 

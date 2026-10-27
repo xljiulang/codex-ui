@@ -335,7 +335,7 @@
 - **标量字段顺序**：`model → 推理强度 → 推理摘要 → 认证方式 → 强制登录 → verbosity`——「推理强度」与「推理摘要」相邻，两个一起调整时不必来回找。
 - **已移除 `personality`（回复风格）**：codex-cli 0.156.0 起 `friendly` / `pragmatic` 不再选择任何风格（协议侧该字段与 `Model.supportsPersonality` 一并标注废弃），设置页不再提供该下拉；config.toml 里遗留的 `personality` 键不会被清理，对 0.156+ 无影响。
 - **推理强度的空档位语义**：目录里的 `supported_reasoning_levels` 为空表示"未知"而不是"明确无档位"——会话里切到这类模型
-  （如 Zen 的 `big-pickle`）**保留当前推理强度**，新建会话则沿用提供方的 `model_reasoning_effort` 作默认强度；
+  （如部分聚合提供方的历史模型）**保留当前推理强度**，新建会话则沿用提供方的 `model_reasoning_effort` 作默认强度；
   只有模型明确声明了档位且不含当前值才回落默认，避免静默变成 `none`、整轮不请求推理。
 
 #### 生成模型目录
@@ -407,123 +407,19 @@
 
 ### 兼容代理
 
-- **兼容代理（设置 → 兼容代理）**：在 `127.0.0.1` 开放一个 OpenAI Responses API 端点，内部翻译为 Chat Completions 并转发到 OpenCode Console（默认 `https://opencode.ai/inference/openai/v1`）。默认端点已跟随 OpenCode 2.1.4 迁移；按用户选择**不自动迁移存量设置**，旧地址需在设置页手动修改。模型目录对 OpenCode 新路径自动回退到 `https://opencode.ai/inference/v1/models`；
-- **模型协议自动判定（无需开关）**：Zen 里有相当一批模型是 **Responses 原生**（文档 endpoint 列 `/inference/v1/responses`：`muse-spark-*`、`gpt-5.x/6.x`、`grok-4.x` 等共 31 个），它们不支持 chat —— 代理**默认先按 chat 翻译**，一旦上游以 `400 ModelProtocolUnsupported`（`Model does not support this protocol.`）拒绝，就**就地改走 Responses 直通重发一次**，并把「该 model id ↔ 协议」**粘滞记住**（进程内，代理重启后重学一次；换上游/端口会重启代理，记忆自然清空）。反过来若上游不接受 Responses，也会自动改回 chat 翻译。其它 4xx（401/403/429/地区限制等）一律不改判、不写记忆。首次遇到 Responses 模型会多一次上游 400 往返（发生在代理内部、未产生计费、客户端无感），此后直接走对的协议；逐请求可在 `compat_proxy.protocol protocol=chat|responses reason=default|learned` 核对，学到新协议时记 `compat_proxy.protocol_switched`；
-- **两个行为开关**（设置页兼容代理卡片内，都是复选框、**默认勾选**，与端口/base_url 一起点「保存」才生效——保存即重启代理）：
-  - **`回合收尾约束和助推（模型空转收尾时自动续跑）`**：控制「口嗨检测与自动续跑」整条链路——首轮收尾契约教学、终局判定与续跑提醒、以及 `<zen_task_completed>` 等收尾标签的剥离；关闭后代理只做协议翻译，终局怎么收尾完全由上游决定（`compat_proxy.nudge_skipped 原因=disabled`），模型就算写出这类标签也原样显示在聊天里。**与上游域名无关**，指向任何上游都按这个开关走；
-  - **`OpenCode 客户端身份（补齐 2.1.4 请求头、工具集与 TLS 指纹）`**：控制全部客户端兼容能力——OpenCode 2.1.4 的 User-Agent、项目/会话识别头、`b3`/`traceparent`、Bun 1.4.4 + BoringSSL 的 TLS ClientHello，以及 `max_tokens` + 6 个内置工具声明。**勾选即对所有上游一律生效，不判断 host**；关闭后不发识别头、不套 TLS profile、不补请求体门禁字段，UA 透传入站值。API Key 仍由模型提供者配置中的 `experimental_bearer_token` 提供并经入站 `Authorization` 原样转发，不读取或持久化 OpenCode OAuth；
-- **翻译入口路径 = 模型提供方 base_url 的路径 + `/responses`**（`…/inference/openai/v1` → `/inference/openai/v1/responses`，base_url 无路径 → `/responses`，一律不锁死 `/v1`；
-  本地 provider 的 base_url 路径必须与「模型提供方的 base_url」一致，只把 host 换成本机代理），判定不看方法以外的任何猜测；
-- **角色映射**：Responses 的 `developer` 角色在 Chat Completions 侧统一降级为 `system`
-  （codex 用 `developer` 下发开发者消息，而 DeepSeek 等兼容端点只认 `system`/`user`/`assistant`/`tool`，会直接 400 `unknown variant developer`），其余角色原样透传；
-- **除该入口外的所有路径/方法都零路径转换透传**——只把 scheme/host/port 换成上游，入站 path 与 query 原样发出（如上游无路径时 `GET /models` → `{上游}/models`），保留 method/query/body/Authorization 等请求信息并附加 opencode 识别头（**识别头与 UA 同样受「OpenCode 客户端身份」开关控制**，两条路径共用一套口径），非 2xx 原样透传；
-- 请求走了翻译还是透传由日志回答：`compat_proxy.passthrough method=… path=… status=…`（2xx info、其余 warn），客户端把 `/responses` 打到非期望路径时另记 `compat_proxy.path_unmatched path=… expected=…`（本地 provider 路径与上游不一致时直接给出期望值）；
-- **上游地址末尾带不带 `/` 都兼容**（`https://a/` 与 `https://a` 等价，路由派生与重启判定都按归一化后的值），且**在设置页保存「模型提供方的 base_url」或端口即重启生效**，无需重启 codex-ui；端口默认 `18080` 可在设置页修改，运行状态实时展示；
-- 兼容代理使用 `wreq 0.15.3` + BoringSSL 作为上游传输；身份开启时使用实测的 OpenCode 2.1.4 TLS/HTTP1 指纹。**默认**发 `opencode/latest/2.1.4/desktop` User-Agent，API Key 读取客户端请求的 `Authorization` 头原样转发，
-  因此请在模型配置页为 provider 填写自己的 OpenCode API Key；兼容代理不会替换、读取或持久化该凭据；
-- **BoringSSL 构建前置**：首次编译需要 CMake 3.22+、NASM 与 `libclang.dll`。Windows 可使用 Visual Studio 自带 CMake/Ninja；若它们不在 PATH，设置 `CMAKE`、`LIBCLANG_PATH` 与 NASM 目录后再运行 Cargo。GitHub Actions 的 Windows runner 同样需要 NASM；
-- **抓包注意**：HTTP Debugger/mitmproxy 等 HTTPS 中间人会替换 ClientHello 的 TLS 栈，导致 OpenCode 或 codex-ui 被服务端按受限流量处理。验证指纹和免费模型时须关闭 `opencode.ai` 的 HTTPS 解密或直接关闭该抓包代理；
-- 代理向上游附加 OpenCode 2.1.4 识别头：`x-opencode-client: desktop`、按当前线程工作区计算的 40 位 `x-opencode-project`、同一 `ses_*` 的四份会话别名 `x-opencode-session` / `x-opencode-session-id` / `x-session-affinity` / `x-session-id`，以及与之一致的 `b3` / `traceparent`；
-  Zen 免费层会校验这个形状（旧写法 `ses_` + 裸 codex 线程 id、18 位随机串会被判成「非 opencode 客户端」并以 `403 FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒绝；
-  OpenCode 2.1.4 的项目 id 按官方算法生成：Git 仓库取规范化 origin 的 `sha1("git-remote:" + host/path)`，非 Git 目录取 `sha1("directory:" + canonical)`；
-  `x-opencode-session` 由客户端请求头 `session-id`（codex 线程 id）**经进程内双向映射表**得到：同一线程在代理生命周期内恒定发同一个 `ses_*`，不同线程互不相同，可反查回线程 id（代理重启后重新分配）；
-  请求头缺失、空白或非可见 ASCII 时回落到代理启动时生成、生命周期内稳定的 `ses_*`；
-- **请求体形状补丁（免费层门禁的第二道）**：2026-09-18 起，识别头已经合法的请求仍会被以同一条 `403 FreeTierError` 拒绝——门禁搬到了请求体，于是**翻译路径**给发往上游的 `chat/completions` 再补两样东西（透传路径一个字段都不动）：
-  - 在与 `messages` 同级的位置补 `max_tokens: 32000`——**仅当入站请求没有自己的输出预算**时补（codex 实测不下发 `max_output_tokens`，故真实请求等价于一律补；其它 Responses 客户端显式给了预算就尊重它）；上游若在 4xx 错误体里指名 `max_tokens`，按既有「可选字段」规则摘掉后重试一次（`compat_proxy.optional_fields_dropped fields=max_tokens`）；
-  - 往 `tools` **末尾**补 opencode 客户端内置的 6 个工具声明（`bash` / `edit` / `glob` / `grep` / `read` / `write`，描述写「这是弃用的工具，请勿调用」、`parameters` 取真实报文的 schema，见 `src-tauri/resources/opencode_tools.json`）——只补缺失的名字：真实工具（含命名空间扁平名与自由格式工具）保留在前、顺序不变，同名时以客户端声明为准；模型真去调用这些假工具时代理照常回译成 `function_call`，由 codex 判 `unsupported call`（代理不做特例过滤）；**同步把一段“弃用工具声明”教学并入发往上游的 `messages`**（首条是 system 消息就追加到它末尾，没有就另起一条 system 消息放在最前；幂等，已有则不重复），只列举本次**实际被追加**的工具名——客户端已声明的同名工具不进教学，教学与 description 形成双重约束。**教学只能写 `messages`**：上游是 chat/completions，没有 `instructions` 字段，入站的 Responses `instructions` 在翻译阶段就已经变成那条 system 消息；
-    - **为什么带真实参数（2026-10-15 起的新门禁口径）**：门禁除名字外还要求 `parameters.properties` 是**非空对象**——此前那版「空对象 schema」的假工具一个都不计数，于是请求必被 403（这正是 10-15 当天 32 次 `FreeTierError` 的直接原因）；换成非空 schema 立刻放行。合格条数**至少 5 个**（实测 1~4 个一律 403、5 个起放行），且只认这 6 个名字（`task` / `todowrite` 等其它内置名、`foo1` 这类杂名都不计数）。描述文本、参数具体内容、`max_tokens`、`tool_choice`、`stream_options`、系统提示词都不参与判定，但保留真实 schema 最稳（上游若哪天校验更深一层也仍然一致）；逐请求可用 `compat_proxy.zen_tools gate_tools=N` 核对（`N < required` 时警告：这条请求注定被上游 403）；**上游同时要求请求体的 `stream` 为 `true`**——同形状请求把 `stream` 改成 `false` 立刻 403，故翻译路径在客户端要非流式时记一条 `compat_proxy.zen_stream_required`（只告警，不改变转发语义：非流式请求发往 Zen 免费层必然 403）；
-  - **生效范围 = 「OpenCode 客户端身份」开关一项，且对上面两项一视同仁**：开即补 `max_tokens` 与这 6 个工具声明（同一个开关，做不到只开其中一项），关即两者都不补；**不再按上游 host 分流**——把 base_url 换成自建/第三方兼容端点（DeepSeek 等）时，只要身份开关还开着就照补（不再需要时请直接关掉该开关）。**客户端自己**通过 `max_output_tokens` 指定的预算不受此限——那是既有的标量映射，照旧发往任意上游；逐请求可在 `compat_proxy.forward` 行的 `身份伪装=on|off` 核对，补丁后的实发请求体见 `logs/compat/*.request.json`；
-  - 代价：每个请求多约 4 KB 的恒定工具声明（6 个真实参数 schema，位置固定在尾部，可被上游缓存）与一小段动态教学文本；无工具声明的后台请求（会话标题、压缩/摘要）同样会看到这些工具，弱模型存在误调假工具的残余风险——所以有工具 description + system 消息教学双重劝退；
-- **Responses 直通路径（自动判定该模型只支持 Responses 时）**：请求体**除门禁补丁外逐字转发**到上游同一路径（当前 OpenCode profile 为 `…/inference/v1/responses`），上游 SSE 逐字回传给 codex ——
-  - 身份开关开启时按 **Responses 形状**补门禁：`tools` 不足 5 个合格声明时在末尾补 6 个内置工具（`{type:"function", name, description:"这是弃用的工具，请勿调用", parameters:<真实 schema>, strict:false}`），并把「弃用工具声明」教学并入顶层 `instructions`（幂等）；补完仍不足时记 `compat_proxy.zen_tools gate_tools=N required=5`；
-  - 实测 codex 的 `namespace` 工具与 `store` / `include` / `prompt_cache_key` / `reasoning` / `text` 字段上游都原样接受，因此**不做任何其它改写**：不展开命名空间（codex-ui 动态工具分组在上游侧保持原样，模型能否调用由上游决定）、不净化历史、不改 `stream`；身份开关关闭时一个字段都不动；
-  - **翻译专属能力在这条路径上不参与**：收尾契约教学、口嗨续跑、收尾标签剥离、历史净化、畸形工具调用保护、usage 明细映射、命名空间展开都不生效 —— 开着「回合收尾约束和助推」时记 `compat_proxy.nudge_skipped 原因=responses_protocol`，避免"看着开了实际没生效"；
-- **直通路径的历史净化（思维链 item）**：`input` 里 `type:"reasoning"` 且**没有 `encrypted_content`** 的 item，代理会把它的 `id` 剥掉（`summary` 等其余字段逐字保留），剥过时记 `compat_proxy.reasoning_ids_stripped count=N`。原因：翻译路径产出的思维链 item 是代理合成的 id（`rs_<unix秒>_<序号>`）+ 只有 summary，而上游 `/responses` 对这类 item **按 id 查**——带上查不到的 id 会被拒（`Referenced reasoning item … was not found or has expired.`）；实测带 `encrypted_content` 的 item 无论 id 是否存在都放行、只有 summary + 未知 id 才 400、只有 summary 且无 id 放行，且 codex 默认 `disable_response_storage = true`（`store:false`），id 本来就不可解析。其它 item 的合成 id 无需处理（`message` / `custom_tool_call` 实测放行，`function_call` 只校验调用与结果的配对）；
-- **直通路径的 custom 工具双向转换（apply_patch）**：上游 `/responses` **拒收 `type:"custom"` 的工具**（实测 `400 invalid_request_error: \`custom\` tools are not supported on this endpoint`），而 codex 的模型目录字段 `apply_patch_tool_type` **只有 `freeform` 一个合法取值**（`codex debug models` 实测报 `unknown variant 'function', expected 'freeform'`），因此 codex 必然把 apply_patch 声明成 custom —— 这层转换只能由代理做：
-  - **请求侧**（不受「OpenCode 客户端身份」开关影响，协议兼容而非伪装）：把每个 `custom` 工具改写成**同名 function**（单 `input` 字符串参数 + 描述里补上补丁语法规范、丢弃 grammar）；同名以客户端已声明的 function 为准，无名条目丢弃；诊断 `compat_proxy.responses_custom_tools count=N names=…`；
-  - **响应侧**：把上游的 `function_call` 回译成 codex 认的 `custom_tool_call`（`response.output_item.added/done` 的 item 类型改写、增量事件改名为 `response.custom_tool_call_input.delta/.done`、`arguments` 换成解码后的 `input`、`response.completed/output[]` 同步改写）；**其余帧逐字透传**，没有 custom 工具的请求完全不改写；
-  - **畸形保护**：被转换的调用若最终 `input` 为空，抑制该调用（不发 added/delta/done）并在收尾改发 `response.failed`，同时记 `compat_proxy.malformed_tool_call` —— 与翻译路径同一口径，避免半截调用进会话；
-  - 历史与工具结果**无需改写**：上游接受历史里的 `custom_tool_call` / `custom_tool_call_output`（实测 200）；
-- **流式健壮性**：
-  - ① 上游返回的工具调用参数被截断/非法（或工具名为空）时，整轮**不发出任何 function_call**、改发 `response.failed`（codex 以明确失败结束，不再静默按完成收尾），并记 `compat_proxy.malformed_tool_call`；
-  - ② 上游随流下发的 `error` 与读取中断同样转成 `response.failed`，不再"按完成收尾"；
-  - ③ 回放历史时自动净化——非法参数改写为 `{}`、有工具调用却没有结果时补一条合成 `tool` 消息（`compat_proxy.history_repaired`），使已中毒的会话无需重启即可继续；
-  - ④ 流式请求默认带 `stream_options.include_usage` 取回 token 用量并映射进 `response.completed.usage`，
-    **明细一并翻译**（`prompt_tokens_details.cached_tokens` → `input_tokens_details.cached_tokens`、
-    `cache_write_tokens` → `input_tokens_details.cache_write_tokens`、
-    `completion_tokens_details.reasoning_tokens` → `output_tokens_details.reasoning_tokens`，
-    并兼容顶层 `cache_read_input_tokens` / `cache_creation_input_tokens` / `reasoning_tokens`）；
-  - **收尾顺序**：`finish_reason` 只做记录，须**等到尾部分片**（`include_usage` 的 usage 就是 finish_reason 之后的独立分片，提前收尾会把它丢掉）再发 `response.completed`，最多等 3 秒宽限、超时记 `compat_proxy.usage_timeout` 并按现状收尾，不会挂住回合；
-  - 每次收到 usage 另记 `compat_proxy.usage`（截断的原始用量），`compat_proxy.request` 记 `input_chars` / `instructions_chars`、
-    收尾记 `compat_proxy.stream_summary`（`finish_reason` / `reasoning_chars` / `text_chars` / `call_count` / `failed` /
-    **`usage=present|none`** / **`delta_keys=…`**）——`usage` 说明上游是否真的上报用量、`delta_keys` 说明推理以什么字段名到达，
-    便于判断是映射问题还是上游没给；
-  - ⑤ **可选请求字段**：`reasoning.effort` → `reasoning_effort`，`parallel_tool_calls` / `prompt_cache_key` / `service_tier` 同名转发，
-    `tool_choice` 转换字符串与 `{type:"function",name}` 两种形态；
-    上游以 4xx **指名**拒绝其中某字段时自动摘掉重试一次（记 `compat_proxy.optional_fields_dropped`），
-    未指名任何可选字段则照旧直接报错、不重复请求；
-  - ⑥ **图片透传**：消息里的 `input_image` 翻成 chat 多模态 parts（`{type:"image_url",image_url:{url}}`，`detail` 仅透传 auto/low/high），纯文本消息仍用字符串 content；`input_file` / `input_audio` 暂不透传；
-  - ⑦ **思考过程**：上游 `reasoning_content`（DeepSeek 系）、`reasoning`（字符串，或带 `content` / `text` / `summary` 的对象）、
-    `reasoning_details`（数组项的 `text` / `summary`，跳过加密项）增量翻成
-    `response.reasoning_summary_part.added|done` 与 `response.reasoning_summary_text.delta|done`；
-  - **前提是让 codex 真的去请求推理**——在「模型配置」把该提供方的 `model_reasoning_effort` 设为非 `none`（如 `medium`）、`model_reasoning_summary` 设为 `auto`，否则目录里 `supported_reasoning_levels` 为空的模型（Zen 专有 ID 常见）不会被请求，卡片自然为空；
-  - ⑧ **截断语义**：`finish_reason = "length"` 以 `response.incomplete`（`incomplete_details.reason = "max_output_tokens"`）结束而非假装 completed，失败仍优先发 `response.failed`；
-  - ⑨ **思考模式历史回传**：codex 会在 `input` 里回放 `reasoning` item（其 `summary[].text` 就是上一条流里翻出去的思维链原文），
-    代理据此给该轮的 assistant 消息补 `reasoning_content`——**带 `tool_calls` 的和带 `content` 的（codex 记的"进度文本"）都要补**：
-    上游声明 tools 时（DeepSeek 实测）校验会一路查到那条文本消息，只补工具调用那条不够；
-    该轮没有回放思维链时补空串（实测同样接受）。
-  - 是否回传由**学习式开关**决定——上游第一次以"缺 `reasoning_content`"报错时自动打开并内部重试一次（记 `compat_proxy.reasoning_content_enabled`），开关粘滞到本次代理实例结束，且**一次请求内最多翻转一次**（上游若反过来不接受该字段则自动关闭，记 `compat_proxy.reasoning_content_disabled`）；
-  - 失败尝试逐条记 `compat_proxy.forward_attempt`（`attempt`/`status`/错误原文 + `messages`/`assistant_with_tools_rc`/`assistant_with_content_rc` 形态统计），`compat_proxy.forward` 另有 `reasoning_rc=on|off` 与 `身份伪装=on|off`（本次是否按 opencode 客户端发请求头并补免费层门禁字段）供逐请求核对；
-- 启用后在「模型配置」页手动添加 provider：
-    `base_url = http://127.0.0.1:{端口}{模型提供方 base_url 的路径}`
-    （默认上游是 `https://opencode.ai/inference/openai/v1`，故填 `http://127.0.0.1:{端口}/inference/openai/v1`；
-    上游填 DeepSeek 官方地址这类无路径的地址时直接填 `http://127.0.0.1:{端口}`）、
-    `wire_api = "responses"`、`experimental_bearer_token` 填自己的 OpenCode API Key，模型名填 Zen 支持的 ID（原样透传）；
-
-#### 兼容代理：命名空间工具翻译
-
-- **兼容代理的工具声明翻译（命名空间工具）**：codex 用 `{"type":"namespace","name":"codexui","tools":[…]}` 声明分组工具（`codexui` 动态工具与多智能体分组都是这种形态），而 Chat Completions 没有命名空间概念、codex 也只认「子工具名 + 命名空间」的调用。
-- 代理据此把命名空间**展开成 `{命名空间}_{子工具}` 扁平函数**发给上游
-  （说明与参数取自子工具；扁平名重复时只保留一个），回译模型调用时还原成 codex 期望的
-  `{"type":"function_call","name":"add_scheduled_task","namespace":"codexui"}`
-  （`response.output_item.added` 与 `done` 两处一致），历史回放里的命名空间调用同样按扁平名发出。
-- 修复前命名空间被拍平成一个无参数的同名函数（如 `codexui`），模型只能瞎调它并被 codex 以 `unsupported call: codexui` 拒绝——这正是「创建定时任务」在兼容代理下跑不通、模型转而翻文档，最后「说要查文档却没有工具调用」直接收尾（回合提前结束）的起因。
-
-#### 兼容代理：自由格式工具翻译
-
-- **兼容代理的工具声明翻译（自由格式工具）**：codex 对 `apply_patch_tool_type="freeform"` 的模型声明
-  `{"type":"custom","name":"apply_patch","description":"…FREEFORM…","format":{grammar…}}`
-  （补丁文本是自由格式，不包 JSON），而 Chat Completions 只有函数调用。
-- 代理把它**暴露成单参数函数**（`input` 字符串必填；
-  描述里的 FREEFORM/「do not wrap in JSON」措辞会被替换为
-  「Edit files (apply_patch patch language).」+「This channel is a function call: put the full patch text in the JSON "input" field.」，
-  `format.grammar` 不下发），回译模型调用时发出完整的 `custom_tool_call` 事件序列
-  （`response.output_item.added` → `response.custom_tool_call_input.delta` → `.done` →
-  `response.output_item.done`，`input` 取 `{"input":…}` 字段或补丁原文），非流式输出 `custom_tool_call` item；
-- 历史里的 `custom_tool_call` / `custom_tool_call_output` 会还原成 assistant 的 function_call 与 `role:"tool"` 消息（此前被整段丢弃）。
-- **补丁语法说明（模型可见文案统一英文）**：codex 的补丁语法只存在于 `format.definition`（lark grammar）里，
-  description 本身只有「可编辑文件 + 别包 JSON」两句，而 Chat Completions 没有语法约束能力——
-  grammar 被丢掉后上游模型（实测 mimo 系）根本不知道 `@@` 的语义，会自创 `@@ 中文描述 @@` 形态的 hunk 头，
-  被 codex 判 `apply_patch verification failed: Failed to find context '… @@'` 后反复换写法重试，
-  最后回退到 PowerShell 字符串替换（实测 09-14 一条 mimo 会话：16 次 apply_patch、5 次失败、203 次 exec_command）。
-- 现在描述里**补上从 grammar 提炼的英文语法规范**
-  （骨架 `*** Begin Patch` → `*** Update File:` → `@@ <原文锚点行>` → 上下文/`-`/`+` 行 →
-  `*** End Patch`，文件块 `Add File` / `Delete File` / `Move to` / `End of File`，
-  以及「hunk 头只能是 `@@` 或文件里逐字存在的一行，禁止 `@@ 描述 @@`；上下文行必须逐字复制、含缩进」），
-  并**在历史里出现补丁失败时追加一条英文纠错提示**
-  （只对这个历史里的自定义工具调用生效，且输出命中
-  `apply_patch verification failed` / `Failed to find context` / `Invalid patch` / `Invalid Context`；
-  只改写发往上游的那条工具结果，codex 侧记录与 rollout 不变）。
-- 诊断：`compat_proxy.request` 增 `patch_failures=<n>`（本次历史里已失败的补丁调用条数），`compat_proxy.stream_summary` 同名字段，`suspicious` 新增 `patch_retry`。
-- **实测**：走 `function_call` 形态会被 codex 判 `Fatal error: tool apply_patch invoked with incompatible payload`，
-  `custom_tool_call` 形态可正常执行补丁。非 JSON 参数按补丁原文接受（空内容仍判畸形）；
-  `type:"web_search"` 内建联网工具仍不暴露给上游（代理无法代执行）。
-
+- **兼容代理（设置 → 兼容代理）**：在 `127.0.0.1` 开放 OpenAI Responses 端点，把 Responses 请求翻译为 Chat Completions，再把 JSON/SSE 响应回译给 codex。上游可以是任意 OpenAI 兼容服务；新安装的 base_url 默认为空，必须手动填写后才能启动。
+- **协议自动判定**：默认先走 Chat 翻译；上游以 `ModelProtocolUnsupported` / `does not support this protocol` 拒绝后，自动改走 Responses 直通并重试一次，学到的模型协议在本次代理进程内粘滞。其它 4xx、5xx 不会触发协议切换。
+- **入口与透传**：翻译入口是上游 base_url 路径加 `/responses`；其余路径/方法只替换 scheme/host/port，保留入站 path、query、method、body 和普通请求头，剔逐跳头、`Host`、`Content-Length`，非 2xx 原样返回。上游末尾 `/` 会在比较和派生路径时归一化。
+- **通用能力**：保留 custom/namespace 工具转换、历史工具配对修复、图片内容、reasoning_content 兼容重试、usage 映射、截断语义和 Responses 直通时的 custom 工具双向转换。兼容代理不再生成固定 User-Agent、OpenCode 识别头、会话映射或免费层请求体补丁。
+- **收尾助推**：设置页只保留「回合收尾约束和助推」开关；关闭后代理只做协议翻译和标签直通，不注入契约、不续跑、不剥离标签。详细行为见下方「口嗨检测与自动续跑」。
+- **配置迁移**：旧 OpenCode 默认地址（`/inference/openai/v1`、旧 `/inference/v1`、更早 `/zen/v1`）与默认开启的客户端身份一起出现时，读取配置会一次性清空 base_url 并关闭兼容代理；自定义上游地址保持不变。已移除的 `compat_proxy_identity_enabled` 字段会在后续保存时从文件中消失。
+- **OpenCode 用户**：codex-ui 不再模拟 OpenCode 客户端，也不承诺通过 OpenCode Console 的免费层校验。请改接独立项目 `D:\github\opencode-proxy`。该项目保存了 OpenCode UA、org/project/session 身份、TLS 指纹和门禁历史；org ID 自动导入、服务启动与发布仍是后续工作。
+- **构建**：兼容代理使用通用 `reqwest` 传输，不再引入 `wreq`、BoringSSL、NASM 或 libclang 构建前置，GitHub Actions 和本地构建脚本也不再准备这些工具。
 #### 兼容代理：口嗨检测与自动续跑
 
-- **兼容代理的口嗨检测与自动续跑**：弱模型（Zen 免费模型尤其明显）常以「接下来我会…/Now update the test …」这类承诺句结束回合、却一次工具都没调用，codex 于是把回合当完成收尾，表现为 agent loop 提前退出。
+- **兼容代理的口嗨检测与自动续跑**：部分弱模型常以「接下来我会…/Now update the test …」这类承诺句结束回合、却一次工具都没调用，codex 于是把回合当完成收尾，表现为 agent loop 提前退出。
 - 代理在**流式翻译路径**里补了一道终局检查：当一个上游响应以「**纯文本 + 零工具调用 + `finish_reason=stop`**」结束时（正是 codex 会就此收尾的那一刻），按「请求来源 + 协作模式」分流处理。
-- **默认模式：判定搬进原对话，只认模型自己回的 `<zen_task_completed>` 标签**（不再有独立的后台判定请求——那条 `chat/completions` 会被 Zen 免费层以 `FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒掉，判定退化成「拿不准按已完成」）：
+- **默认模式：判定搬进原对话，只认模型自己回的 `<zen_task_completed>` 标签**（不再发送独立的后台判定请求，避免额外上游往返和模型判定漂移）：
   代理把提醒作为**合成 user 消息**追加到发给上游的历史里（历史尾部先补一条本轮助手文本，再补提醒），并**再打一次上游，把第二轮的事件续在同一个 SSE 流**上——工具调用照常下发给 codex，`response.completed` 只发一次，对 codex 与应用完全透明，注入的提醒**不会进入 codex 记录**（聊天里看不到任何伪造消息）。
   提醒是**两条路径强收尾**（编号给出，模型只需二选一）：① **仍有可执行的剩余工作** → **必须实际调用工具完成剩余工作**，不得用文字描述、计划或承诺代替工具调用，也不得直接甩出完成标签逃避执行；② **任务已结束、无需继续或无法继续**（已完成 / 无需改动 / 用户已放弃 / 确实做不下去）→ 不复述上一条回复正文、不重复此前已执行过的工具操作（例如已 git commit/push 的，不得再次提交/推送），**整轮只回一行 `<zen_task_completed>已完成</zen_task_completed>`**（标签里只写这四种短词之一；标签外不得有任何其他字符——收尾轮再补正文只会是噪音，上一轮正文已经展示过）。
   终局文本出现该标签（大小写不敏感 + 前缀匹配，缺闭合标签同样命中；**不解析载荷**）即视为任务已终结、直接收尾（`nudge_skipped 原因=task_completed 模式=default`），不再注入、不触发后续 pass。
@@ -563,7 +459,7 @@
 
 - **现象**：弱模型按 codex 的 base instructions 去调用 `update_plan`，codex 回 `unsupported call: update_plan`，模型遂把它转述成「工具 update_plan 不可用」。**默认模式与计划模式都会出现**。
 - **根因（0.154.0 实测抓包）**：请求的 `tools` 数组里**没有** `update_plan`（只有 `exec_command` / `write_stdin` / goal 三件套 / 若干命名空间工具 / `web_search` 等），但同一请求的 `instructions` 里仍有两处承诺它存在（`## Planning` 段与文末 ``## `update_plan` `` 整节），计划模式还多一段 `## Plan Mode vs update_plan tool`——属 codex 侧「提示词承诺了一个未注册的工具」。
-- **代理侧不做特例、也无法适配**：代理原样翻译转发客户端的工具声明；codex 的工具注册表在回合开始时即固定，代理无法让 codex 接受一个它没注册的工具（替模型吞掉调用、自行合成工具结果会让计划不再显示在应用里，语义也脏）。同一现象在不走 Zen 的 provider 上同样复现，与 Zen 无关。
+- **代理侧不做特例、也无法适配**：代理原样翻译转发客户端的工具声明；codex 的工具注册表在回合开始时即固定，代理无法让 codex 接受一个它没注册的工具（替模型吞掉调用、自行合成工具结果会让计划不再显示在应用里，语义也脏）。同一现象在多个 provider 上均可复现，属于 codex 协议侧问题。
 - **当前处理**：不改代码 / 提示词，作为已知问题记录；完整取证（mock 抓包命令、rollout 次数统计）与两个未实施的备选方案见 [docs/变更记录.md](docs/变更记录.md) 2026-09-17 条目。
 - **版本范围（2026-09-25 复核）**：该不一致出现在 **0.149–0.154**；0.155/0.156 的内置模型目录已完全不含 `update_plan` 与 `## Planning` 段（0.154 有 18 处、0.156.1 为 0），属 codex 侧随版本自行消失，无需本项目改动。
 
@@ -592,8 +488,6 @@ $env:CODEXUI_COMPAT_TRACE='1'; .\build-dev.bat     # 或先设置系统环境变
 #### 摘要字段与可疑标记
 
 - **摘要字段**：`call_id` / `attempt` / `model` / `stream` / `upstream_url` /
-  `x_opencode_session`（实发的 opencode 形状会话 id）/ `session_codex`（由双向映射表反查出的 codex 线程 id，
-  回落会话记 `-`，两者对照即可定位是哪个线程）/ `x_opencode_request` /
   `authorization=present|absent`（**从不落盘 API Key**）/ `message_count` / `tool_count` /
   `dropped_fields` / `reasoning_rc` / `elapsed_ms` / `upstream_status` / `finish_reason` /
   `text_chars` / `reasoning_chars` / `call_count` / `failed` / `usage` / `delta_keys` /

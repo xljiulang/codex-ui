@@ -30,16 +30,12 @@ pub struct AppSettings {
     /// 兼容代理监听端口（默认 18080）
     #[serde(default = "default_compat_proxy_port")]
     pub compat_proxy_port: u16,
-    /// 兼容代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
+    /// 兼容代理转发上游 API 请求地址（默认空，必须填写后才能启动）
     #[serde(default = "default_compat_proxy_base_url")]
     pub compat_proxy_base_url: String,
     /// 兼容代理「回合收尾约束和助推」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
     #[serde(default = "default_compat_proxy_nudge_enabled")]
     pub compat_proxy_nudge_enabled: bool,
-    /// 兼容代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁；
-    /// 勾选即对所有上游一律生效，不再判断 host），默认开启
-    #[serde(default = "default_compat_proxy_identity_enabled")]
-    pub compat_proxy_identity_enabled: bool,
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
     #[serde(default = "default_error_notify_enabled")]
     pub error_notify_enabled: bool,
@@ -58,10 +54,6 @@ fn default_compat_proxy_base_url() -> String {
 }
 
 fn default_compat_proxy_nudge_enabled() -> bool {
-    true
-}
-
-fn default_compat_proxy_identity_enabled() -> bool {
     true
 }
 
@@ -101,7 +93,6 @@ impl Default for AppSettings {
             compat_proxy_port: default_compat_proxy_port(),
             compat_proxy_base_url: default_compat_proxy_base_url(),
             compat_proxy_nudge_enabled: default_compat_proxy_nudge_enabled(),
-            compat_proxy_identity_enabled: default_compat_proxy_identity_enabled(),
             error_notify_enabled: default_error_notify_enabled(),
             interaction_notify_enabled: default_interaction_notify_enabled(),
         }
@@ -112,14 +103,14 @@ pub fn settings_path(app_dir: &Path) -> std::path::PathBuf {
     app_dir.join("settings.json")
 }
 
-/// 改名兼容：把旧键 `zen_proxy_*` 的值搬到新键 `compat_proxy_*`。
+/// 兼容旧配置：把旧键 `zen_proxy_*` 的值搬到新键 `compat_proxy_*`。
 ///
-/// 2026-09-22 把 Zen 代理改名为「兼容代理」，五个设置键随之改名。这里做**读兼容**：
+/// 2026-09-22 把 Zen 代理改名为「兼容代理」，相关设置键随之改名。这里做**读兼容**：
 /// 旧 `settings.json` 里只有旧键时，先原地改名为新键再解析（下次 `save` 自然只写新键）；
 /// 新旧键并存时以**新键**为准，避免覆盖用户已经用新版本保存过的值；两个都没有时不动，
 /// 由各字段的 `serde(default)` 回退默认值。非对象 JSON 或读取失败时原样返回，交给既有
 /// 「解析失败即回退默认」的路径处理。
-fn migrate_legacy_zen_proxy_keys(raw: &str) -> String {
+fn migrate_legacy_compat_proxy_settings(raw: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return raw.to_string();
     };
@@ -143,17 +134,56 @@ fn migrate_legacy_zen_proxy_keys(raw: &str) -> String {
             changed = true;
         }
     }
+    // 身份模拟已拆到独立代理。旧默认 OpenCode 地址如果仍配合默认开启的身份开关，
+    // 一次性清空地址并关闭代理；自定义上游地址保持原样。
+    let identity_setting = obj.remove("compat_proxy_identity_enabled");
+    if identity_setting.is_some() {
+        changed = true;
+    }
+    let identity_enabled = identity_setting
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    if identity_enabled {
+        let is_legacy_default = obj
+            .get("compat_proxy_base_url")
+            .and_then(|value| value.as_str())
+            .is_some_and(is_legacy_opencode_default_base_url);
+        if is_legacy_default {
+            obj.insert(
+                "compat_proxy_base_url".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+            obj.insert(
+                "compat_proxy_enabled".to_string(),
+                serde_json::Value::Bool(false),
+            );
+            changed = true;
+        }
+    }
     if !changed {
         return raw.to_string();
     }
     serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
 }
 
+fn is_legacy_opencode_default_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if url.host_str() != Some("opencode.ai") {
+        return false;
+    }
+    matches!(
+        url.path().trim_end_matches('/'),
+        "/inference/openai/v1" | "/inference/v1" | "/zen/v1"
+    )
+}
+
 pub fn load(app_dir: &Path) -> AppSettings {
     let p = settings_path(app_dir);
     fs::read_to_string(&p)
         .ok()
-        .map(|s| migrate_legacy_zen_proxy_keys(&s))
+        .map(|s| migrate_legacy_compat_proxy_settings(&s))
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
@@ -402,7 +432,7 @@ mod tests {
     #[test]
     fn compat_proxy_defaults_and_roundtrips() {
         let dir = TempDir::new().unwrap();
-        // 旧 settings.json 缺失 compat_proxy 字段：回退关闭 + 默认端口
+        // 新安装没有上游地址：回退关闭 + 默认端口 + 空地址
         let p = settings_path(dir.path());
         fs::write(
             &p,
@@ -415,15 +445,11 @@ mod tests {
             s.compat_proxy_port,
             crate::codex::compat_proxy::DEFAULT_COMPAT_PROXY_PORT
         );
-        assert_eq!(
-            s.compat_proxy_base_url,
-            crate::codex::compat_proxy::DEFAULT_COMPAT_BASE_URL
-        );
-        // 两个行为开关同样缺失：回退默认开启（行为与旧版本一致）
+        assert!(s.compat_proxy_base_url.is_empty());
+        // 收尾助推缺失时默认开启
         assert!(s.compat_proxy_nudge_enabled);
-        assert!(s.compat_proxy_identity_enabled);
 
-        // 自定义端口与开关往返一致
+        // 自定义端口、地址与开关往返一致
         let s = AppSettings {
             compat_proxy_enabled: true,
             compat_proxy_port: 19090,
@@ -439,13 +465,11 @@ mod tests {
             "https://custom.example.com/v1"
         );
         assert!(loaded.compat_proxy_nudge_enabled);
-        assert!(loaded.compat_proxy_identity_enabled);
     }
 
     #[test]
-    fn compat_proxy_behavior_switches_default_true_and_roundtrip() {
+    fn compat_proxy_nudge_defaults_true_and_roundtrips() {
         let dir = TempDir::new().unwrap();
-        // 旧 settings.json 缺失两个行为开关：回退默认开启
         let p = settings_path(dir.path());
         fs::write(
             &p,
@@ -454,31 +478,16 @@ mod tests {
         .unwrap();
         let s = load(dir.path());
         assert!(s.compat_proxy_nudge_enabled);
-        assert!(s.compat_proxy_identity_enabled);
 
-        // 显式关闭与开启均可往返一致
         let s = AppSettings {
             compat_proxy_nudge_enabled: false,
-            compat_proxy_identity_enabled: false,
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
-        let loaded = load(dir.path());
-        assert!(!loaded.compat_proxy_nudge_enabled);
-        assert!(!loaded.compat_proxy_identity_enabled);
-
-        let s = AppSettings {
-            compat_proxy_nudge_enabled: true,
-            compat_proxy_identity_enabled: false,
-            ..AppSettings::default()
-        };
-        save(dir.path(), &s).unwrap();
-        let loaded = load(dir.path());
-        assert!(loaded.compat_proxy_nudge_enabled);
-        assert!(!loaded.compat_proxy_identity_enabled);
+        assert!(!load(dir.path()).compat_proxy_nudge_enabled);
     }
 
-    /// 改名兼容：旧键 `zen_proxy_*` 仍能被读入（写回时只写新键）。
+    /// 改名兼容：旧键 `zen_proxy_*` 仍能被读入，身份键只用于迁移后丢弃。
     #[test]
     fn legacy_zen_proxy_keys_are_still_read() {
         let dir = TempDir::new().unwrap();
@@ -500,7 +509,6 @@ mod tests {
             "旧键 base_url 应被读入"
         );
         assert!(!s.compat_proxy_nudge_enabled, "旧键 nudge 应被读入");
-        assert!(!s.compat_proxy_identity_enabled, "旧键 identity 应被读入");
 
         // 保存后写的是新键：文件里不再出现旧键
         save(dir.path(), &s).unwrap();
@@ -530,7 +538,6 @@ mod tests {
         assert_eq!(s.compat_proxy_port, 20001);
         assert_eq!(s.compat_proxy_base_url, "https://new.example.com/v1");
         assert!(s.compat_proxy_nudge_enabled);
-        assert!(s.compat_proxy_identity_enabled);
     }
 
     /// 改名兼容：只写新键时正常读入（旧键缺失不影响）。
@@ -549,16 +556,12 @@ mod tests {
         assert!(s.compat_proxy_enabled);
         assert_eq!(s.compat_proxy_port, 19292);
         assert_eq!(s.compat_proxy_base_url, "https://only-new.example.com/v1");
-        // 未给出的两个行为开关回退默认（开启）
         assert!(s.compat_proxy_nudge_enabled);
-        assert!(s.compat_proxy_identity_enabled);
     }
 
-    /// 迁移函数本身：旧键改名、新键优先、非对象/坏 JSON 原样返回、无旧键时也原样返回。
     #[test]
     fn migrate_legacy_keys_rewrites_only_when_needed() {
-        // 只有旧键 → 全部改名为新键，旧键一个不留
-        let migrated = migrate_legacy_zen_proxy_keys(
+        let migrated = migrate_legacy_compat_proxy_settings(
             r#"{"theme":"blue","zen_proxy_port":19191,"zen_proxy_enabled":true}"#,
         );
         assert!(
@@ -576,8 +579,9 @@ mod tests {
         );
 
         // 新旧并存 → 保留新值
-        let migrated =
-            migrate_legacy_zen_proxy_keys(r#"{"compat_proxy_port":20001,"zen_proxy_port":19999}"#);
+        let migrated = migrate_legacy_compat_proxy_settings(
+            r#"{"compat_proxy_port":20001,"zen_proxy_port":19999}"#,
+        );
         assert!(
             migrated.contains("\"compat_proxy_port\":20001"),
             "{migrated}"
@@ -586,10 +590,55 @@ mod tests {
 
         // 没有旧键：原样返回（不做无意义的重新序列化）
         let raw = r#"{ "theme" : "blue" }"#;
-        assert_eq!(migrate_legacy_zen_proxy_keys(raw), raw);
+        assert_eq!(migrate_legacy_compat_proxy_settings(raw), raw);
 
         // 坏 JSON / 非对象：原样返回，交给既有「解析失败回退默认」路径
-        assert_eq!(migrate_legacy_zen_proxy_keys("not json"), "not json");
-        assert_eq!(migrate_legacy_zen_proxy_keys("[1,2]"), "[1,2]");
+        assert_eq!(migrate_legacy_compat_proxy_settings("not json"), "not json");
+        assert_eq!(migrate_legacy_compat_proxy_settings("[1,2]"), "[1,2]");
+    }
+
+    #[test]
+    fn legacy_opencode_default_migration_clears_and_disables_proxy() {
+        for base_url in [
+            "https://opencode.ai/inference/openai/v1",
+            "https://opencode.ai/inference/v1/",
+            "https://opencode.ai/zen/v1",
+        ] {
+            let dir = TempDir::new().unwrap();
+            let p = settings_path(dir.path());
+            fs::write(
+                &p,
+                format!(
+                    r#"{{"compat_proxy_enabled":true,"compat_proxy_base_url":"{base_url}","compat_proxy_identity_enabled":true}}"#
+                ),
+            )
+            .unwrap();
+            let s = load(dir.path());
+            assert!(!s.compat_proxy_enabled, "{base_url}");
+            assert!(s.compat_proxy_base_url.is_empty(), "{base_url}");
+        }
+    }
+
+    #[test]
+    fn legacy_identity_migration_keeps_custom_upstream() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"compat_proxy_enabled":true,
+                "compat_proxy_base_url":"https://custom.example.com/v1",
+                "compat_proxy_identity_enabled":true}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(s.compat_proxy_enabled);
+        assert_eq!(s.compat_proxy_base_url, "https://custom.example.com/v1");
+
+        save(dir.path(), &s).unwrap();
+        let raw = fs::read_to_string(&p).unwrap();
+        assert!(
+            !raw.contains("compat_proxy_identity_enabled"),
+            "身份键应在读取迁移时丢弃：{raw}"
+        );
     }
 }

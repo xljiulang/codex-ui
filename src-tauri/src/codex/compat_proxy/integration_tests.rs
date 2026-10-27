@@ -2,6 +2,7 @@
 
 use super::test_support::*;
 use super::*;
+use axum::http::HeaderValue;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -13,15 +14,7 @@ struct Received {
     body: Value,
     authorization: Option<String>,
     user_agent: Option<String>,
-    opencode_client: Option<String>,
-    opencode_project: Option<String>,
-    opencode_request: Option<String>,
-    opencode_session: Option<String>,
-    opencode_session_id: Option<String>,
-    session_affinity: Option<String>,
-    session_id: Option<String>,
-    b3: Option<String>,
-    traceparent: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -32,36 +25,6 @@ struct PassthroughReceived {
     body: Value,
     authorization: Option<String>,
     user_agent: Option<String>,
-    opencode_client: Option<String>,
-    opencode_project: Option<String>,
-    opencode_request: Option<String>,
-    opencode_session: Option<String>,
-    opencode_session_id: Option<String>,
-    session_affinity: Option<String>,
-    session_id: Option<String>,
-    b3: Option<String>,
-    traceparent: Option<String>,
-}
-
-fn assert_opencode_project_id(project: Option<&str>) {
-    let project = project.expect("应发送 x-opencode-project");
-    assert_eq!(project.len(), 40, "OpenCode 项目 id 应为 40 位：{project}");
-    assert!(
-        project.bytes().all(|b| b.is_ascii_hexdigit()),
-        "OpenCode 项目 id 应为十六进制：{project}"
-    );
-}
-
-fn assert_trace_headers(b3: Option<&str>, traceparent: Option<&str>) {
-    let b3 = b3.expect("应发送 b3");
-    let traceparent = traceparent.expect("应发送 traceparent");
-    let parts: Vec<&str> = b3.split('-').collect();
-    assert_eq!(parts.len(), 4, "b3 形状不合法：{b3}");
-    assert_eq!(parts[0].len(), 32);
-    assert_eq!(parts[1].len(), 16);
-    assert_eq!(parts[2], "1");
-    assert_eq!(parts[3].len(), 16);
-    assert_eq!(traceparent, format!("00-{}-{}-01", parts[0], parts[1]));
 }
 
 /// 起一个本地 mock Zen 服务，返回监听地址与接收记录。
@@ -70,53 +33,25 @@ async fn spawn_mock_zen(rec: Arc<AsyncMutex<Option<Received>>>) -> String {
         "/chat/completions",
         axum::routing::post(
             move |headers: HeaderMap, Json(body): Json<Value>| async move {
-                let mut g = rec.lock().await;
-                *g = Some(Received {
+                *rec.lock().await = Some(Received {
                     body,
+                    headers: headers
+                        .iter()
+                        .map(|(name, value)| {
+                            (
+                                name.as_str().to_string(),
+                                value.to_str().unwrap_or("<non-ascii>").to_string(),
+                            )
+                        })
+                        .collect(),
                     authorization: headers
                         .get(header::AUTHORIZATION)
                         .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
+                        .map(str::to_string),
                     user_agent: headers
                         .get(header::USER_AGENT)
                         .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    opencode_client: headers
-                        .get("x-opencode-client")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    opencode_project: headers
-                        .get("x-opencode-project")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    opencode_request: headers
-                        .get("x-opencode-request")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    opencode_session: headers
-                        .get("x-opencode-session")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    opencode_session_id: headers
-                        .get("x-opencode-session-id")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    session_affinity: headers
-                        .get("x-session-affinity")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    session_id: headers
-                        .get("x-session-id")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    b3: headers
-                        .get("b3")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
-                    traceparent: headers
-                        .get("traceparent")
-                        .and_then(|h| h.to_str().ok())
-                        .map(|s| s.to_string()),
+                        .map(str::to_string),
                 });
                 Json(json!({
                     "id": "chatcmpl-mock",
@@ -141,7 +76,7 @@ async fn spawn_mock_zen(rec: Arc<AsyncMutex<Option<Received>>>) -> String {
     format!("http://{addr}")
 }
 
-/// 起一个本地 mock Zen 透传端点，返回带 `/v1` 前缀的 base URL。
+/// 起一个本地 mock 透传端点，返回带 `/v1` 前缀的 base URL。
 async fn spawn_mock_passthrough(rec: Arc<AsyncMutex<Option<PassthroughReceived>>>) -> String {
     let rec_get = rec.clone();
     let app = Router::new()
@@ -161,42 +96,6 @@ async fn spawn_mock_passthrough(rec: Arc<AsyncMutex<Option<PassthroughReceived>>
                             .map(str::to_string),
                         user_agent: headers
                             .get(header::USER_AGENT)
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        opencode_client: headers
-                            .get("x-opencode-client")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        opencode_project: headers
-                            .get("x-opencode-project")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        opencode_request: headers
-                            .get("x-opencode-request")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        opencode_session: headers
-                            .get("x-opencode-session")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        opencode_session_id: headers
-                            .get("x-opencode-session-id")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        session_affinity: headers
-                            .get("x-session-affinity")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        session_id: headers
-                            .get("x-session-id")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        b3: headers
-                            .get("b3")
-                            .and_then(|h| h.to_str().ok())
-                            .map(str::to_string),
-                        traceparent: headers
-                            .get("traceparent")
                             .and_then(|h| h.to_str().ok())
                             .map(str::to_string),
                     });
@@ -224,42 +123,6 @@ async fn spawn_mock_passthrough(rec: Arc<AsyncMutex<Option<PassthroughReceived>>
                                 .map(str::to_string),
                             user_agent: headers
                                 .get(header::USER_AGENT)
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            opencode_client: headers
-                                .get("x-opencode-client")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            opencode_project: headers
-                                .get("x-opencode-project")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            opencode_request: headers
-                                .get("x-opencode-request")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            opencode_session: headers
-                                .get("x-opencode-session")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            opencode_session_id: headers
-                                .get("x-opencode-session-id")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            session_affinity: headers
-                                .get("x-session-affinity")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            session_id: headers
-                                .get("x-session-id")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            b3: headers
-                                .get("b3")
-                                .and_then(|h| h.to_str().ok())
-                                .map(str::to_string),
-                            traceparent: headers
-                                .get("traceparent")
                                 .and_then(|h| h.to_str().ok())
                                 .map(str::to_string),
                         });
@@ -292,6 +155,10 @@ async fn forwards_chat_with_auth_and_user_agent() {
         header::AUTHORIZATION,
         axum::http::HeaderValue::from_static("Bearer public"),
     );
+    headers.insert(
+        header::USER_AGENT,
+        axum::http::HeaderValue::from_static("codex-ui-test/1.0"),
+    );
     let state = proxy_state(base_url, None);
     // 走完整翻译入口：`forward` 直调不会写 `compat_proxy.forward` 那一行请求日志
     let resp = handle_any(
@@ -307,69 +174,25 @@ async fn forwards_chat_with_auth_and_user_agent() {
     // 验证上游收到的内容
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
     assert_eq!(got.authorization.as_deref(), Some("Bearer public"));
-    assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
+    assert_eq!(got.user_agent.as_deref(), Some("codex-ui-test/1.0"));
     assert_eq!(got.body["model"], "zen/gpt-5-mini");
     assert_eq!(got.body["messages"][0]["role"], "system");
     assert_eq!(got.body["messages"][1]["role"], "user");
     assert_eq!(got.body["messages"][1]["content"], "你好");
     assert_eq!(got.body["stream"], false);
-    // 模拟 opencode 客户端的识别头
-    assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_opencode_project_id(got.opencode_project.as_deref());
-    assert!(got.opencode_request.is_none());
-    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
-    // 客户端没给 session-id：用代理级稳定会话（形状同样合法）
-    assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn forwards_chat_prefers_client_session_header() {
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let mut headers = HeaderMap::new();
-    headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-    let state = proxy_state(base_url, None);
-    let resp = handle_any(
-        State(state.clone()),
-        Method::POST,
-        OriginalUri("/responses".parse().unwrap()),
-        headers.clone(),
-        Body::from(req.to_string()),
-    )
-    .await;
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    // 按 codex 会话 id 派生的 opencode 会话标识：ses_ + 26 位 [0-9A-Za-z]
-    let session = got.opencode_session.clone().expect("应有会话 id");
-    assert_is_opencode_id(&session, "ses");
-    // 反查能把实发值映射回 codex 线程 id（诊断用）
-    assert_eq!(
-        state.session_map.codex_of(&session).as_deref(),
-        Some("3f1a2b3c")
+    assert!(got.body.get("max_tokens").is_none());
+    assert!(got.body.get("tools").is_none());
+    assert!(
+        !got.headers
+            .iter()
+            .any(|(name, _)| name.starts_with("x-opencode-")
+                || matches!(
+                    name.as_str(),
+                    "x-session-affinity" | "x-session-id" | "b3" | "traceparent"
+                )),
+        "通用代理不应生成 OpenCode 身份头：{:?}",
+        got.headers
     );
-    assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_opencode_project_id(got.opencode_project.as_deref());
-    assert!(got.opencode_request.is_none());
-    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
-    assert_eq!(got.opencode_session_id.as_deref(), Some(session.as_str()));
-    assert_eq!(got.session_affinity.as_deref(), Some(session.as_str()));
-    assert_eq!(got.session_id.as_deref(), Some(session.as_str()));
-
-    // 同一 codex 会话的后续请求发同一个 x-opencode-session，不同会话则不同
-    let resp = forward(&req, &headers, false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-    let again = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(again.opencode_session.as_deref(), Some(session.as_str()));
-    assert_eq!(again.opencode_session_id.as_deref(), Some(session.as_str()));
-    assert_ne!(again.b3, got.b3, "每条请求都应生成新的追踪上下文");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -385,9 +208,7 @@ async fn forwards_without_auth_when_client_sends_none() {
     assert!(resp.status.is_success());
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
     assert_eq!(got.authorization, None);
-    assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
-    assert!(got.opencode_request.is_none());
-    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
+    assert_eq!(got.user_agent, None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -395,16 +216,12 @@ async fn passthrough_forwards_models_and_post_body() {
     let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> = Arc::new(AsyncMutex::new(None));
     let base_url = spawn_mock_passthrough(rec.clone()).await;
     let state = ProxyState {
-        session: "ses_fixed123".into(),
-        opencode_identity: true,
         nudge_enabled: true,
         base_url,
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
+        client: reqwest::Client::new(),
         log: None,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        session_map: Arc::new(SessionMap::default()),
         protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     };
@@ -416,6 +233,10 @@ async fn passthrough_forwards_models_and_post_body() {
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        header::USER_AGENT,
+        HeaderValue::from_static("codex-ui-test"),
     );
 
     let uri: Uri = "/v1/models?foo=bar".parse().unwrap();
@@ -430,16 +251,7 @@ async fn passthrough_forwards_models_and_post_body() {
     assert_eq!(got.path, "/v1/models");
     assert_eq!(got.query.as_deref(), Some("foo=bar"));
     assert_eq!(got.authorization.as_deref(), Some("Bearer public"));
-    assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
-    assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_opencode_project_id(got.opencode_project.as_deref());
-    // 透传路径同样只需要合法形状：没带 session-id 时用代理级稳定会话
-    assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
-    assert!(got.opencode_request.is_none());
-    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
+    assert_eq!(got.user_agent.as_deref(), Some("codex-ui-test"));
 
     let uri: Uri = "/v1/echo".parse().unwrap();
     let resp = forward_passthrough(
@@ -457,60 +269,17 @@ async fn passthrough_forwards_models_and_post_body() {
     assert_eq!(got.body["a"], 1);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn passthrough_prefers_client_session_header() {
-    let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_passthrough(rec.clone()).await;
-    let state = ProxyState {
-        session: "ses_fixed123".into(),
-        opencode_identity: true,
-        nudge_enabled: true,
-        base_url,
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
-        log: None,
-        trace: TraceSink::disabled(),
-        requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        session_map: Arc::new(SessionMap::default()),
-        protocols: protocol_cache(),
-        modes: Arc::new(ThreadModeRegistry::default()),
-    };
-    let mut headers = HeaderMap::new();
-    headers.insert("session-id", HeaderValue::from_static("client-session-42"));
-
-    let uri: Uri = "/v1/models".parse().unwrap();
-    let resp = forward_passthrough(&state, Method::GET, &uri, &headers, Body::empty()).await;
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let got = rec.lock().await.clone().expect("mock 应已收到 GET 请求");
-    // 入站 session-id 不合法（不是 opencode 形状）也不影响：代理按它派生一个合法会话 id
-    let session = got.opencode_session.clone().expect("应有会话 id");
-    assert_is_opencode_id(&session, "ses");
-    assert_eq!(
-        state.session_map.codex_of(&session).as_deref(),
-        Some("client-session-42")
-    );
-}
-
 /// 起一个"任何方法/路径都记录一行并回 chat.completion JSON"的上游，
 /// 用于分辨请求走的是翻译分支还是透传分支。
 async fn spawn_mock_record_all(rec: Arc<AsyncMutex<Vec<String>>>) -> String {
     let app = Router::new()
         .fallback(
-            move |method: Method, uri: Uri, headers: HeaderMap, _body: axum::body::Bytes| {
+            move |method: Method, uri: Uri, _headers: HeaderMap, _body: axum::body::Bytes| {
                 let rec = rec.clone();
                 async move {
-                    let session = headers
-                        .get("x-opencode-session")
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("-")
-                        .to_string();
-                    rec.lock().await.push(format!(
-                        "{} {} {}",
-                        method.as_str(),
-                        uri.path(),
-                        session
-                    ));
+                    rec.lock()
+                        .await
+                        .push(format!("{} {}", method.as_str(), uri.path()));
                     Json(json!({
                         "id": "chatcmpl-mock",
                         "object": "chat.completion",
@@ -542,7 +311,7 @@ async fn body_text(resp: Response) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// 记录行的最后一条：`METHOD path session`。
+/// 记录行的最后一条：`METHOD path`。
 async fn last_row(rec: &Arc<AsyncMutex<Vec<String>>>) -> Option<String> {
     rec.lock().await.last().cloned()
 }
@@ -784,16 +553,12 @@ fn modes_with(thread_id: &str, mode: &str) -> Arc<ThreadModeRegistry> {
 /// 测「跨请求不复用计数」这类行为时必须复用同一个 state）。
 fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
     ProxyState {
-        session: "ses_fixed123".into(),
         base_url: upstream.to_string(),
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
+        client: reqwest::Client::new(),
         log,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        opencode_identity: true,
         nudge_enabled: true,
-        session_map: Arc::new(SessionMap::default()),
         protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
@@ -953,51 +718,6 @@ async fn nudge_skipped_when_completion_tag_present() {
 }
 
 /// 续跑轮与首轮走同一个 `forward`：门禁补丁在每一轮上游请求体里都要在。
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn zen_body_patch_applies_to_nudge_continuation() {
-    let (upstream, rec) = spawn_mock_zen_scripted(vec![
-        ScriptedReply::Sse(sse_text_reply(
-            "Now update the test - specifically the base_url path test.",
-        )),
-        completion_reply("已完成"),
-    ])
-    .await;
-
-    let state = nudge_probe_state(&upstream, None);
-    let body = run_nudge_probe_state(state, HeaderMap::new(), nudge_probe(true)).await;
-    assert_eq!(body.matches("event: response.completed").count(), 1);
-
-    let calls = rec.lock().await.clone();
-    assert_eq!(calls.len(), 2, "应为：首轮 + 续跑");
-    for call in &calls {
-        assert_eq!(
-            call["max_tokens"], ZEN_MAX_TOKENS,
-            "每一轮都要补 max_tokens：{call}"
-        );
-        let names: Vec<&str> = call["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|tool| tool["function"]["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            names,
-            vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
-            "每一轮都要补假工具：{call}"
-        );
-        // 教学只能走 messages：system 消息同时带首轮契约与弃用声明
-        let system = call["messages"][0]["content"].as_str().unwrap_or_default();
-        assert!(
-            system.contains(DEFAULT_MODE_CONTRACT_TEXT) && system.contains("弃用工具声明"),
-            "system 消息应同时带首轮教学契约与弃用教学：{call}"
-        );
-        assert!(
-            call.get("instructions").is_none(),
-            "chat 体不应出现顶层 instructions：{call}"
-        );
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn nudge_stops_after_max_injections() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -1899,16 +1619,12 @@ fn proxy_state(base_url: String, log: ZenLog) -> ProxyState {
 
 fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
     ProxyState {
-        session: "ses_fixed123".into(),
-        opencode_identity: true,
         nudge_enabled: true,
         base_url,
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
+        client: reqwest::Client::new(),
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        session_map: Arc::new(SessionMap::default()),
         protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
@@ -1937,7 +1653,7 @@ async fn dispatches_translation_on_base_url_path_plus_responses() {
         assert!(body.contains("\"object\":\"response\""), "{body}");
         assert_eq!(
             rec.lock().await.clone(),
-            vec!["POST /zen/v2/chat/completions ses_fixed123".to_string()]
+            vec!["POST /zen/v2/chat/completions".to_string()]
         );
     }
 
@@ -1957,7 +1673,7 @@ async fn dispatches_translation_on_base_url_path_plus_responses() {
     assert!(body.contains("\"object\":\"response\""), "{body}");
     assert_eq!(
         rec.lock().await.clone(),
-        vec!["POST /chat/completions ses_fixed123".to_string()]
+        vec!["POST /chat/completions".to_string()]
     );
 }
 
@@ -1984,7 +1700,7 @@ async fn unmatched_responses_path_passes_through_and_warns() {
     assert!(body_text(resp).await.contains("chat.completion"));
     assert_eq!(
         rec.lock().await.clone(),
-        vec!["POST /responses ses_fixed123".to_string()]
+        vec!["POST /responses".to_string()]
     );
 
     let logged = std::fs::read_dir(dir.path())
@@ -2016,10 +1732,7 @@ async fn non_post_on_responses_path_passes_through() {
     )
     .await;
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        rec.lock().await.clone(),
-        vec!["GET /responses ses_fixed123".to_string()]
-    );
+    assert_eq!(rec.lock().await.clone(), vec!["GET /responses".to_string()]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2032,7 +1745,7 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(port, &format!("{upstream}/zen/v1"), true, true),
+        CompatProxyConfig::new(port, &format!("{upstream}/zen/v1"), true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2052,15 +1765,12 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     assert!(text.contains("\"object\":\"response\""), "{text}");
     let rows = rec.lock().await.clone();
     assert_eq!(rows.len(), 1);
-    assert!(
-        rows[0].starts_with("POST /zen/v1/chat/completions ses_"),
-        "{rows:?}"
-    );
+    assert_eq!(rows[0], "POST /zen/v1/chat/completions");
 
     let status = apply(
         &mut handle,
         false,
-        CompatProxyConfig::new(port, &upstream, true, true),
+        CompatProxyConfig::new(port, &upstream, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2104,7 +1814,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(port, &upstream_a.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_a.clone(), true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2125,11 +1835,11 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let first = last_row(&rec_a).await.expect("上游 A 应已收到请求");
     rec_a.lock().await.clear();
 
-    // 端口与上游都没变（含只差尾斜杠的等价写法）→ 复用实例，会话标识不变。
+    // 端口与上游都没变（含只差尾斜杠的等价写法）→ 复用实例。
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(port, &upstream_a.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_a.clone(), true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2139,7 +1849,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(port, &format!("{upstream_a}/"), true, true),
+        CompatProxyConfig::new(port, &format!("{upstream_a}/"), true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2158,7 +1868,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(port, &upstream_b.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_b.clone(), true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2167,7 +1877,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     assert!(status.running, "{:?}", status.error);
     probe(port).await;
     let second = last_row(&rec_b).await.expect("上游 B 应已收到请求");
-    assert_ne!(first.split(' ').nth(2), second.split(' ').nth(2));
+    assert_eq!(first, second);
     assert_eq!(rec_a.lock().await.len(), before_a);
 
     // 端口变化 → 也重启。
@@ -2175,7 +1885,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        CompatProxyConfig::new(other_port, &upstream_b, true, true),
+        CompatProxyConfig::new(other_port, &upstream_b, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2185,48 +1895,11 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     assert_eq!(status.port, other_port);
     probe(other_port).await;
 
-    // 只改行为开关（端口与上游不动）→ 同样重启：开关是代理运行期行为，必须重新装配。
-    rec_b.lock().await.clear();
-    let before_switch = last_row(&rec_b).await;
-    let status = apply(
-        &mut handle,
-        true,
-        CompatProxyConfig::new(other_port, &upstream_b, false, true),
-        None,
-        TraceSink::disabled(),
-        Arc::new(ThreadModeRegistry::default()),
-    )
-    .await;
-    assert!(status.running, "{:?}", status.error);
-    probe(other_port).await;
-    let after_switch = last_row(&rec_b).await.expect("重启后上游应再次收到请求");
-    assert_ne!(
-        before_switch,
-        Some(after_switch.clone()),
-        "改开关应重启（会话标识重新分配）：{after_switch}"
-    );
-    let status = apply(
-        &mut handle,
-        true,
-        CompatProxyConfig::new(other_port, &upstream_b, false, true),
-        None,
-        TraceSink::disabled(),
-        Arc::new(ThreadModeRegistry::default()),
-    )
-    .await;
-    assert!(status.running, "{:?}", status.error);
-    probe(other_port).await;
-    assert_eq!(
-        last_row(&rec_b).await,
-        Some(after_switch),
-        "开关取值相同则复用实例（不应重启）"
-    );
-
     // 关闭 → 停止。
     let status = apply(
         &mut handle,
         false,
-        CompatProxyConfig::new(other_port, &upstream_a, true, true),
+        CompatProxyConfig::new(other_port, &upstream_a, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2305,16 +1978,12 @@ async fn learns_and_retries_reasoning_content_requirement() {
     let dir = tempfile::TempDir::new().unwrap();
     let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
     let state = ProxyState {
-        session: "ses_fixed123".into(),
-        opencode_identity: true,
         nudge_enabled: true,
         base_url: upstream,
-        project_id: crate::codex::opencode_profile::current_project_id(),
-        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
+        client: reqwest::Client::new(),
         log,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        session_map: Arc::new(SessionMap::default()),
         protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     };
@@ -2535,272 +2204,6 @@ async fn reasoning_effort_is_dropped_and_retried_when_rejected() {
     );
 }
 
-/// Zen 上游（补丁开启）：上游实收的 chat 请求体同时带 `max_tokens` 与 6 个假工具，
-/// 真实工具保留在前、顺序不变。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn zen_body_patch_reaches_upstream_request_body() {
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({
-        "model": "m",
-        "input": "hi",
-        "stream": false,
-        "tools": [{
-            "type": "function",
-            "name": "shell",
-            "description": "run shell",
-            "parameters": { "type": "object", "properties": {} }
-        }]
-    });
-    let state = proxy_state(base_url, None);
-    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(
-        got.body["max_tokens"], ZEN_MAX_TOKENS,
-        "应补门禁要求的 max_tokens"
-    );
-    let names: Vec<&str> = got.body["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["function"]["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        names,
-        vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
-        "真实工具保留在前、缺的假工具按固定顺序补在后：{}",
-        got.body
-    );
-    assert_eq!(
-        got.body["tools"][1]["function"]["description"],
-        ZEN_FAKE_TOOL_DESCRIPTION
-    );
-    // 门禁口径：补出来的假工具必须带非空 parameters.properties，否则整批都不计数
-    assert!(
-        count_gate_tools(&got.body) >= ZEN_MIN_GATE_TOOLS,
-        "实发请求体里合格工具不足门禁下限：{}",
-        got.body
-    );
-    assert_eq!(
-        got.body["tools"][1]["function"]["parameters"]["required"],
-        json!(["command"]),
-        "bash 假工具应带真实报文的参数 schema：{}",
-        got.body
-    );
-    // 该请求非流式、无 instructions → 没有 system 消息，教学另起一条放在最前
-    assert!(
-        got.body.get("instructions").is_none(),
-        "chat 体不应出现顶层 instructions：{}",
-        got.body
-    );
-    assert_eq!(
-        got.body["messages"][0]["role"], "system",
-        "无 system 消息时教学应另起一条放在最前：{}",
-        got.body
-    );
-    let system = got.body["messages"][0]["content"].as_str().unwrap();
-    assert!(
-        system.contains("弃用工具声明") && system.contains("bash、edit、glob、grep、read、write"),
-        "system 消息应带列出全部 6 个假工具的弃用教学：{system}"
-    );
-}
-
-/// 门禁要求上游请求体 `stream: true`：客户端要非流式时不改转发语义，但要留一条
-/// 可解释「上游必然 403」的告警。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn zen_non_stream_request_logs_stream_required_warning() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let state = proxy_state(base_url, log);
-    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(got.body["stream"], false, "转发语义不变：仍是非流式");
-    let joined = read_session_log(&dir);
-    assert!(
-        joined.contains("event=compat_proxy.zen_stream_required"),
-        "非流式应记门禁告警：{joined}"
-    );
-    assert!(
-        !joined.contains("event=compat_proxy.zen_tools"),
-        "本请求合格工具够数，不该记工具告警：{joined}"
-    );
-}
-
-/// 门禁最低 5 个合格工具（名字在名单内 + `parameters.properties` 非空）：客户端自己
-/// 声明了空 parameters 的同名工具时补丁不覆盖，合格数可能掉到 5 以下 —— 此时记 warn
-/// 暴露问题（该请求注定被上游 403）。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn gate_tool_shortage_is_logged() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    // 客户端占了 5 个门禁名字但 properties 为空 → 只有补出来的 write 算合格
-    let empty = json!({ "type": "object", "properties": {} });
-    let tools: Vec<Value> = ["bash", "edit", "glob", "grep", "read"]
-        .iter()
-        .map(|name| json!({ "type": "function", "name": name, "parameters": empty }))
-        .collect();
-    let req = json!({ "model": "m", "input": "hi", "stream": true, "tools": tools });
-    let state = proxy_state(base_url, log);
-    let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(
-        count_gate_tools(&got.body),
-        1,
-        "只有补出来的 write 合格：{}",
-        got.body
-    );
-    let joined = read_session_log(&dir);
-    assert!(
-        joined.contains("event=compat_proxy.zen_tools")
-            && joined.contains("gate_tools=1")
-            && joined.contains(&format!("required={ZEN_MIN_GATE_TOOLS}")),
-        "合格数不足应记 warn：{joined}"
-    );
-}
-
-/// 合格工具够数时不写工具告警（避免每轮都产生无用日志）。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn gate_tool_sufficiency_is_not_logged() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({ "model": "m", "input": "hi", "stream": true });
-    let state = proxy_state(base_url, log);
-    let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(
-        count_gate_tools(&got.body),
-        ZEN_REQUIRED_TOOL_NAMES.len(),
-        "补出来的 6 个假工具应全部合格：{}",
-        got.body
-    );
-    let joined = read_session_log(&dir);
-    assert!(
-        !joined.contains("event=compat_proxy.zen_tools")
-            && !joined.contains("event=compat_proxy.zen_stream_required"),
-        "合格且流式时不该有门禁告警：{joined}"
-    );
-}
-
-/// 非 opencode 上游（回环 mock / 自建 / 第三方兼容端点）：身份开关开启时**同样**补
-/// 门禁形状——补丁不再看上游 host，只看「OpenCode 客户端身份」开关。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn zen_body_patch_applies_to_non_opencode_upstream_when_identity_on() {
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({
-        "model": "m",
-        "input": "hi",
-        "stream": false,
-        "tools": [{
-            "type": "function",
-            "name": "shell",
-            "description": "run shell",
-            "parameters": { "type": "object", "properties": {} }
-        }]
-    });
-    // 身份开关默认开启 → 回环地址（host 不含 opencode）也照补
-    let state = proxy_state(base_url, None);
-    assert!(state.opencode_identity, "默认开启身份");
-    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(
-        got.body["max_tokens"], ZEN_MAX_TOKENS,
-        "身份开启时对所有上游都补 max_tokens：{}",
-        got.body
-    );
-    let names: Vec<&str> = got.body["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["function"]["name"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        names,
-        vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
-        "身份开启时对所有上游都补假工具：{}",
-        got.body
-    );
-    assert!(
-        got.body.get("instructions").is_none(),
-        "chat 体不应出现顶层 instructions：{}",
-        got.body
-    );
-    // 弃用工具教学同样照发（该请求无 instructions → 教学另起一条 system 消息放在最前）
-    let system = got.body["messages"][0]["content"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(
-        system.contains("弃用工具声明"),
-        "身份开启时应注入弃用工具教学：{}",
-        got.body
-    );
-}
-
-/// 上游在 4xx 错误体里指名 `max_tokens`：摘掉后重试一次（复用既有可选字段降级路径），
-/// 回环重试仍带工具补丁。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn zen_max_tokens_is_dropped_and_retried_when_rejected() {
-    let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
-    let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "max_tokens").await;
-
-    let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let state = proxy_state(base_url, None);
-    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-    assert_eq!(
-        resp.dropped_fields,
-        vec!["max_tokens"],
-        "应标记被摘掉的字段"
-    );
-    assert_eq!(*count.lock().await, 2, "应恰好重试一次");
-
-    let got = last.lock().await.clone().expect("mock 应已收到请求");
-    assert!(
-        got.get("max_tokens").is_none(),
-        "重试不应再带 max_tokens：{got}"
-    );
-    assert_eq!(
-        got["tools"].as_array().unwrap().len(),
-        ZEN_REQUIRED_TOOL_NAMES.len(),
-        "工具补丁不受可选字段摘除影响：{got}"
-    );
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unrelated_4xx_is_not_retried() {
     let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
@@ -2859,7 +2262,7 @@ async fn finish_without_more_chunks_times_out_and_completes() {
     let dir = tempfile::TempDir::new().unwrap();
     let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
     let base_url = spawn_mock_upstream_holding_open().await;
-    let resp = http_client(true)
+    let resp = reqwest::Client::new()
         .get(format!("{base_url}/stream"))
         .send()
         .await
@@ -3241,158 +2644,9 @@ async fn trace_records_upstream_error_body() {
     );
 }
 
-// ---------- 两个行为开关：身份伪装 / 回合收尾约束和助推 ----------
+// ---------- 回合收尾约束和助推 ----------
 
-/// 身份开关关闭：翻译路径不发任何识别头、UA 透传入站值；上游请求体保持原样
-/// （补丁只看「OpenCode 客户端身份」开关这一项判据）。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn identity_switch_off_stops_headers_and_body_patch() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({
-        "model": "m",
-        "input": "hi",
-        "stream": false,
-        "tools": [{
-            "type": "function",
-            "name": "shell",
-            "description": "run shell",
-            "parameters": { "type": "object", "properties": {} }
-        }]
-    });
-    let trace_dir = tempfile::TempDir::new().unwrap();
-    let mut state = proxy_state_traced(base_url, log, traced_sink(trace_dir.path()));
-    state.opencode_identity = false;
-    let mut headers = HeaderMap::new();
-    headers.insert(header::USER_AGENT, HeaderValue::from_static("codex/1.2.3"));
-    headers.insert(
-        "x-opencode-session",
-        HeaderValue::from_static("ses_attacker_supplied"),
-    );
-
-    // 走完整翻译入口：`forward` 直调不会写 `compat_proxy.forward` 那一行请求日志
-    let resp = handle_any(
-        State(state),
-        Method::POST,
-        OriginalUri("/responses".parse().unwrap()),
-        headers,
-        Body::from(req.to_string()),
-    )
-    .await;
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert!(
-        got.body.get("max_tokens").is_none(),
-        "关闭身份后不应补 max_tokens：{}",
-        got.body
-    );
-    let names: Vec<&str> = got.body["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| tool["function"]["name"].as_str().unwrap_or(""))
-                .collect()
-        })
-        .unwrap_or_default();
-    assert_eq!(names, vec!["shell"], "关闭身份后不应补假工具：{}", got.body);
-    assert_eq!(got.user_agent.as_deref(), Some("codex/1.2.3"));
-    assert_eq!(got.opencode_client, None, "关闭时不应发识别头");
-    assert_eq!(got.opencode_project, None);
-    assert_eq!(got.opencode_request, None);
-    assert_eq!(
-        got.opencode_session, None,
-        "关闭时连入站自带的同名头也要剔除"
-    );
-    assert_eq!(got.opencode_session_id, None);
-    assert_eq!(got.session_affinity, None);
-    assert_eq!(got.session_id, None);
-    assert_eq!(got.b3, None);
-    assert_eq!(got.traceparent, None);
-    // 诊断：请求行记 `身份伪装=off`，内容日志里的识别头一律记 `-`
-    let joined = read_session_log(&dir);
-    assert!(joined.contains("身份伪装=off"), "{joined}");
-    assert!(
-        !joined.contains("zen_body="),
-        "冗余的 zen_body 诊断列应已删除：{joined}"
-    );
-    let (_, summary) = trace_file_with(trace_dir.path(), ".summary.txt");
-    assert!(summary.contains("identity=off"), "{summary}");
-    assert!(summary.contains("x_opencode_session=-"), "{summary}");
-}
-
-/// 身份开关开启：既发识别头/UA，也补门禁字段（不看上游 host，回环 mock 同样成立）。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn identity_switch_on_keeps_headers_and_body_patch() {
-    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
-    let base_url = spawn_mock_zen(rec.clone()).await;
-
-    let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let state = proxy_state(base_url, None);
-    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
-
-    let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
-    assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_opencode_project_id(got.opencode_project.as_deref());
-    assert!(got.opencode_request.is_none());
-    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
-    assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
-    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
-    assert!(got.body.get("max_tokens").is_some(), "{}", got.body);
-}
-
-/// 真实网络探针：使用与兼容代理完全相同的 wreq/BoringSSL 传输发送一次
-/// `big-pickle` 请求。默认忽略，避免 CI 联网；运行时需显式提供：
-/// - `CODEXUI_OPENCODE_API_KEY`
-/// - `CODEXUI_OPENCODE_BASE_URL`（默认新 OpenCode OpenAI 兼容路径）
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "真实 OpenCode 网络探针，需 API Key 且会消耗免费额度"]
-async fn live_opencode_214_big_pickle_probe() {
-    let key = std::env::var("CODEXUI_OPENCODE_API_KEY").ok();
-    let has_key = key.as_deref().is_some_and(|key| !key.trim().is_empty());
-    let base_url = std::env::var("CODEXUI_OPENCODE_BASE_URL")
-        .unwrap_or_else(|_| DEFAULT_COMPAT_BASE_URL.to_string());
-    let mut headers = HeaderMap::new();
-    if let Some(key) = key.as_deref().filter(|key| !key.trim().is_empty()) {
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {key}")).expect("API Key 不能包含非法头字符"),
-        );
-    }
-    headers.insert("session-id", HeaderValue::from_static("tls-probe-session"));
-    let state = proxy_state(base_url, None);
-    let req = json!({
-        "model": "big-pickle",
-        "input": "只回复 OK",
-        "stream": true
-    });
-    let forwarded = forward(&req, &headers, true, &state, "tls_probe")
-        .await
-        .expect("真实 OpenCode 请求应完成传输");
-    eprintln!(
-        "OPENCODE_214_PROBE status={} profile={}",
-        forwarded.status,
-        crate::codex::opencode_profile::OPENCODE_VERSION
-    );
-    if has_key {
-        assert_eq!(forwarded.status, StatusCode::OK);
-    } else {
-        assert_eq!(forwarded.status, StatusCode::UNAUTHORIZED);
-    }
-}
-
-/// 收尾约束关闭：终局即使「纯文本 + 零工具调用」也不注入、不续跑，只打一次上游；
-/// 且不再剥离 zen 标签（正文里的标签原样交给 codex）。
+/// 收尾助推关闭：翻译路径不注入契约、不续跑，并保留模型返回的标签。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn nudge_switch_off_skips_injection_and_keeps_tags() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -3636,21 +2890,15 @@ async fn protocol_auto_switches_chat_to_responses_and_sticks() {
         "首次应先用 chat 试探、被拒后改走 responses"
     );
 
-    // 实发 Responses 请求体：补足门禁工具（Responses 形状）+ 教学并入 instructions；
-    // 客户端自己的工具与其它字段逐字保留
+    // 实发 Responses 请求体：通用代理不改写工具或 instructions。
     let sent = seen
         .lock()
         .await
         .clone()
         .expect("mock 应收到 responses 请求");
-    assert!(
-        count_gate_tools(&sent) >= ZEN_MIN_GATE_TOOLS,
-        "补丁后合格工具应达标：{sent}"
-    );
     assert_eq!(sent["tools"][0]["name"], "shell", "{sent}");
-    assert!(sent["instructions"]
-        .as_str()
-        .is_some_and(|text| text.contains("弃用工具声明")));
+    assert_eq!(sent["tools"].as_array().unwrap().len(), 1, "{sent}");
+    assert!(sent.get("instructions").is_none(), "{sent}");
     assert_eq!(sent["input"][0]["content"][0]["text"], "hi", "{sent}");
 
     // 第二次同模型：直接 responses（学到即粘滞）
@@ -3729,33 +2977,7 @@ async fn protocol_auto_ignores_other_4xx() {
     );
 }
 
-/// 身份开关关闭时直通路径一个字段都不动（不补门禁、不写教学）。
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn responses_passthrough_skips_gate_patch_when_identity_off() {
-    let (upstream, _, seen) =
-        spawn_mock_protocol_split(ProtocolReply::Unsupported, ProtocolReply::Ok).await;
-    let mut state = proxy_state(upstream, None);
-    state.opencode_identity = false;
-    assert!(learn_protocol(&state, Some("m"), ModelProtocol::Responses));
-
-    let request = protocol_probe_request("m");
-    let resp = call_responses_entry(state, request.clone()).await;
-    assert_eq!(resp.status(), StatusCode::OK);
-    let sent = seen
-        .lock()
-        .await
-        .clone()
-        .expect("mock 应收到 responses 请求");
-    assert_eq!(
-        sent, request,
-        "身份开关关闭时请求体应逐字原样转发（不含任何补丁与教学）"
-    );
-}
-
-// ---------- 直通路径的 custom 工具双向转换（apply_patch）----------
-
-/// 一段含 `apply_patch` 函数调用的 Responses SSE：形状逐字取自真机抓包
-/// （上游对「被声明成 function 的 apply_patch」就是吐这套 `function_call` 事件）。
+/// 通用直通路径不补免费层门禁字段，也不写教学。
 fn responses_tool_call_frames(arguments: &str) -> String {
     let mut out = String::new();
     out.push_str(&sse_event(
@@ -3933,7 +3155,7 @@ async fn responses_passthrough_stays_verbatim_without_custom_tools() {
     );
     assert!(text.contains("\"function_call\""), "{text}");
 
-    // 请求体只多了门禁补丁（身份开关开启），工具声明保持 function，不出现 custom
+    // 通用路径只做 custom→function 协议转换，不注入其他补丁。
     let sent = seen.lock().await.clone().expect("mock 应收到请求");
     assert!(
         sent["tools"]
