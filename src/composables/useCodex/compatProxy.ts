@@ -11,7 +11,7 @@ export interface CompatProxyStatus {
 }
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/inference/v1";
+const DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1";
 
 /** 应用本地代理所需的全部参数（两个行为开关缺省按开启）。 */
 export interface CompatProxyOptions {
@@ -20,7 +20,7 @@ export interface CompatProxyOptions {
   baseUrl: string;
   /** 「回合收尾约束和助推」：空转收尾时自动续跑，默认开启 */
   nudgeEnabled?: boolean;
-  /** 「OpenCode 客户端身份」：识别头/UA + 免费层门禁补丁（不分上游），默认开启 */
+  /** 「OpenCode 客户端身份」：识别头/UA、TLS 指纹 + 免费层门禁补丁（不分上游），默认开启 */
   identityEnabled?: boolean;
 }
 

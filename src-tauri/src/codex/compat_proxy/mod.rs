@@ -26,20 +26,17 @@ use serde_json::{json, Map, Value};
 use tokio::task::AbortHandle;
 
 use crate::codex::compat_trace::{TraceCall, TraceSink};
+use crate::codex::opencode_profile::{tracing_headers, OPENCODE_CLIENT, OPENCODE_USER_AGENT};
 use crate::codex::session_log::SessionLog;
 
 /// 兼容代理默认端口（可在设置页修改）。
 pub(crate) const DEFAULT_COMPAT_PROXY_PORT: u16 = 18080;
-/// 模拟 opencode 桌面客户端的固定识别头（随请求发往 Zen）。
-const OPENCODE_CLIENT: &str = "desktop";
-const OPENCODE_PROJECT: &str = "global";
-/// OpenCode Zen 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
+/// OpenCode Console 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
 ///
-/// 2026-10-15 起上游把免费层门禁挪到了 `/inference/v1`：同一份请求打老的
-/// `https://opencode.ai/zen/v1` 会被恒定拒绝（实测连 opencode 客户端报文逐字回放也是
-/// `403 FreeTierError`），只有 `/inference/v1` 能通过，故默认值随之迁移。
-/// 已保存过旧值的用户不会被自动改写，需在设置页手改成 `/inference/v1`。
-pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/inference/v1";
+/// OpenCode 2.1.4 的实际 OpenAI 兼容 chat 路径是 `/inference/openai/v1`；
+/// 模型列表仍在相邻的 `/inference/v1/models`。
+/// 已保存的旧默认值不会自动改写，需在设置页手动修改。
+pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/inference/openai/v1";
 /// OpenCode 免费层的**请求体门禁**要求请求里出现这些工具名（opencode 客户端的内置工具）：
 /// 只在 `tools` 里补声明、不提供任何实现，模型真去调用时由 codex 侧以 `unsupported call`
 /// 裁决（代理不做特例过滤）。
@@ -62,8 +59,8 @@ const ZEN_TOOL_SCHEMAS_JSON: &str = include_str!("../../../resources/opencode_to
 /// 与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受「OpenCode 客户端身份」开关约束：开关开启时对
 /// **所有上游**都补，关闭时一个字段都不补（见 [`ProxyState::opencode_identity`]）。
 const ZEN_MAX_TOKENS: u64 = 32_000;
-/// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
-const ZEN_USER_AGENT: &str = "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
+/// 请求上游时固定的 User-Agent（与 OpenCode 2.1.4 桌面客户端一致）。
+const ZEN_USER_AGENT: &str = OPENCODE_USER_AGENT;
 /// 反向代理时不应转发的逐跳请求/响应头。
 const HOP_BY_HOP_HEADERS: [&str; 8] = [
     "connection",
@@ -602,7 +599,7 @@ fn normalize_base_url(base_url: &str) -> String {
 /// codex 对 provider 的 base_url 追加 `/responses`，因此本地 provider 的路径需与提供方一致。
 fn responses_path(base_url: &str) -> String {
     let base = normalize_base_url(base_url);
-    let path = reqwest::Url::parse(&base)
+    let path = wreq::Url::parse(&base)
         .map(|url| url.path().trim_end_matches('/').to_string())
         .unwrap_or_default();
     format!("{path}/responses")
@@ -614,10 +611,34 @@ pub(crate) async fn start(
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
+    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
 ) -> Result<CompatProxyHandle, String> {
     let port = config.port;
     let base_url = config.base_url.clone();
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    log_at(
+        &log,
+        "info",
+        "compat_proxy.transport",
+        &[
+            ("transport", "wreq".to_string()),
+            (
+                "profile",
+                if config.opencode_identity {
+                    format!(
+                        "opencode-{}",
+                        crate::codex::opencode_profile::OPENCODE_VERSION
+                    )
+                } else {
+                    "plain".to_string()
+                },
+            ),
+            (
+                "proxy",
+                if proxy_env_configured() { "on" } else { "off" }.to_string(),
+            ),
+        ],
+    );
     let mut attempt = 0;
     let listener = loop {
         match tokio::net::TcpListener::bind(addr).await {
@@ -635,6 +656,8 @@ pub(crate) async fn start(
     let app = Router::new().fallback(handle_any).with_state(ProxyState {
         session: opencode_id("ses", true),
         session_map: Arc::new(SessionMap::default()),
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects,
         base_url: base_url.clone(),
         log,
         trace,
@@ -654,7 +677,25 @@ pub(crate) async fn start(
     })
 }
 
-/// 由 `CodexServer` 调用：按设置启停代理并返回当前状态。
+fn proxy_env_configured() -> bool {
+    [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ]
+    .iter()
+    .any(|name| {
+        std::env::var(name)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
+/// 测试便捷入口：使用临时项目登记表启停代理。
+#[cfg(test)]
 pub(crate) async fn apply(
     handle: &mut Option<CompatProxyHandle>,
     enabled: bool,
@@ -662,6 +703,28 @@ pub(crate) async fn apply(
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
+) -> CompatProxyStatus {
+    apply_with_projects(
+        handle,
+        enabled,
+        config,
+        log,
+        trace,
+        modes,
+        Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
+    )
+    .await
+}
+
+/// 与 [`apply`] 相同，但使用 app-server 维护的线程项目登记表。
+pub(crate) async fn apply_with_projects(
+    handle: &mut Option<CompatProxyHandle>,
+    enabled: bool,
+    config: CompatProxyConfig,
+    log: ZenLog,
+    trace: TraceSink,
+    modes: Arc<ThreadModeRegistry>,
+    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
 ) -> CompatProxyStatus {
     let port = config.port;
     // 端口、上游地址与两个行为开关都没变（含 `https://a/` 与 `https://a` 这类等价写法）
@@ -674,7 +737,7 @@ pub(crate) async fn apply(
         }
     }
     if need_start {
-        match start(config, log, trace, modes).await {
+        match start(config, log, trace, modes, projects).await {
             Ok(h) => {
                 *handle = Some(h);
                 CompatProxyStatus {
@@ -713,6 +776,10 @@ struct ProxyState {
     session: String,
     /// 「codex 会话 id ↔ 上游 `ses_*`」映射表，见 [`SessionMap`]。
     session_map: Arc<SessionMap>,
+    /// 当前工作区对应的 OpenCode 项目 id。
+    project_id: String,
+    /// 按 codex 线程 id 登记的 OpenCode 项目 id。
+    projects: Arc<crate::codex::opencode_profile::ThreadProjectRegistry>,
     base_url: String,
     log: ZenLog,
     /// 内容诊断日志（常开）：每次上游尝试的请求体/响应原文/收尾事件。
@@ -807,11 +874,16 @@ fn log_at(log: &Option<Arc<SessionLog>>, level: &str, event: &str, kv: &[(&str, 
 const OPENCODE_ID_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 /// opencode 客户端识别头：由「OpenCode 客户端身份」开关统一控制（关闭时一个都不发，
 /// 入站请求带来的同名声也要剔除，避免误当成 opencode 客户端）。
-const OPENCODE_IDENTITY_HEADERS: [&str; 4] = [
+const OPENCODE_IDENTITY_HEADERS: [&str; 9] = [
     "x-opencode-client",
     "x-opencode-project",
     "x-opencode-request",
     "x-opencode-session",
+    "x-opencode-session-id",
+    "x-session-affinity",
+    "x-session-id",
+    "b3",
+    "traceparent",
 ];
 /// opencode 客户端标识的后段长度：`ses_` / `msg_` 之后固定 26 位。
 const OPENCODE_ID_LEN: usize = 26;
@@ -983,15 +1055,39 @@ fn normalize_client_session(raw: &str) -> Option<String> {
     (!bare.is_empty()).then(|| bare.to_string())
 }
 
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    // 不在客户端上固定 User-Agent：识别头与 UA 都由每个请求按「OpenCode 客户端身份」
-    // 开关决定（见 [`apply_opencode_identity`]），关闭时才能透传入站 UA。
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
+fn http_client(opencode_identity: bool) -> &'static wreq::Client {
+    static PLAIN: std::sync::OnceLock<wreq::Client> = std::sync::OnceLock::new();
+    static OPENCODE: std::sync::OnceLock<wreq::Client> = std::sync::OnceLock::new();
+    let slot = if opencode_identity { &OPENCODE } else { &PLAIN };
+    slot.get_or_init(|| build_http_client(opencode_identity))
+}
+
+fn build_http_client(opencode_identity: bool) -> wreq::Client {
+    let mut headers_order = Vec::new();
+    if opencode_identity {
+        headers_order.extend(
+            crate::codex::opencode_profile::OPENCODE_HEADER_ORDER
+                .iter()
+                .filter_map(|name| wreq::header::HeaderName::from_bytes(name.as_bytes()).ok()),
+        );
+    }
+    let http1_config = wreq::Http1Config::builder().build();
+    let http2_config = wreq::Http2Config::builder().build();
+    let tls_config = if opencode_identity {
+        crate::codex::opencode_profile::tls_config()
+    } else {
+        wreq::TlsConfig::default()
+    };
+    let emulation = wreq::EmulationProvider::builder()
+        .http1_config(http1_config)
+        .tls_config(tls_config)
+        .http2_config(http2_config)
+        .headers_order(headers_order)
+        .build();
+    wreq::Client::builder()
+        .emulation(emulation)
+        .build()
+        .unwrap_or_else(|_| wreq::Client::new())
 }
 
 /// `compat_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
@@ -1715,13 +1811,13 @@ fn rewrite_responses_frame(frame: &[u8], st: &mut ResponsesToolRewrite, log: &Ze
 
 /// 把上游 SSE 字节流按帧改写后下发（只在本次请求含 custom 工具时使用）。
 fn rewrite_responses_stream(
-    stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static,
+    stream: impl Stream<Item = Result<axum::body::Bytes, wreq::Error>> + Send + 'static,
     state: ResponsesToolRewrite,
     log: ZenLog,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static {
     /// 上游字节流（装箱固定，`unfold` 的 carry 需要可移动）
     type Inner = std::pin::Pin<
-        Box<dyn Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static>,
+        Box<dyn Stream<Item = Result<axum::body::Bytes, wreq::Error>> + Send + 'static>,
     >;
     struct Carry {
         inner: Inner,
@@ -1910,8 +2006,8 @@ async fn forward_passthrough_rewriting(
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
-    let rq = http_client()
-        .request(to_reqwest_method(&Method::POST), url)
+    let rq = http_client(state.opencode_identity)
+        .request(to_wreq_method(&Method::POST), url)
         .headers(forwarded_request_headers(headers, state))
         .body(body);
     match rq.send().await {
@@ -1959,11 +2055,11 @@ async fn forward_passthrough(
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
-    let mut rq = http_client()
-        .request(to_reqwest_method(&method), url)
+    let mut rq = http_client(state.opencode_identity)
+        .request(to_wreq_method(&method), url)
         .headers(forwarded_request_headers(headers, state));
     if method_has_body(&method) {
-        rq = rq.body(reqwest::Body::wrap_stream(body.into_data_stream()));
+        rq = rq.body(wreq::Body::wrap_stream(body.into_data_stream()));
     }
     match rq.send().await {
         Ok(resp) => {
@@ -1998,8 +2094,8 @@ fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str
 }
 
 /// 透传目标 URL：scheme/host/port 取自 base_url，入站 path 与 query 原样发出（零路径转换）。
-fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
-    let mut url = reqwest::Url::parse(&normalize_base_url(base_url))
+fn passthrough_url(base_url: &str, uri: &Uri) -> Result<wreq::Url, String> {
+    let mut url = wreq::Url::parse(&normalize_base_url(base_url))
         .map_err(|e| format!("兼容代理转发地址无效: {e}"))?;
     url.set_path(uri.path());
     url.set_query(uri.query());
@@ -2020,19 +2116,17 @@ fn opencode_session(state: &ProxyState, headers: &HeaderMap) -> String {
 }
 
 /// 按「OpenCode 客户端身份」开关落到请求头上的全部效果（翻译路径与透传路径共用）：
-/// - 开启：附加固定识别头（`x-opencode-client` / `-project` / `-request` / `-session`）与
-///   opencode 客户端 UA，入站 UA 一律丢弃（与既有行为一致）；
+/// - 开启：附加 OpenCode 2.1.4 的识别头、会话别名、追踪头与客户端 UA，入站 UA 一律丢弃；
 /// - 关闭：不附加任何识别头，并把入站自带的同名头剔除（避免仍然“自称 opencode”），
 ///   UA 改为透传入站值；入站没有 UA 时不带 UA（客户端不再设默认 UA）。
 ///
-/// `session` 与 `request_id` 由调用方提供，保证内容日志里记的值与实发头逐字一致；
-/// 关闭时两者不参与发送。
+/// `session` 由调用方提供，保证内容日志里记的值与实发头逐字一致。
 fn apply_opencode_identity(
     out: &mut HeaderMap,
     headers: &HeaderMap,
     state: &ProxyState,
     session: &str,
-    request_id: &str,
+    _request_id: &str,
 ) {
     for name in OPENCODE_IDENTITY_HEADERS {
         out.remove(name);
@@ -2050,17 +2144,35 @@ fn apply_opencode_identity(
     );
     out.insert(
         "x-opencode-project",
-        HeaderValue::from_static(OPENCODE_PROJECT),
+        HeaderValue::from_str(&opencode_project(state, session))
+            .expect("OpenCode 项目 id 必须合法"),
     );
-    if let Ok(value) = HeaderValue::from_str(request_id) {
-        out.insert("x-opencode-request", value);
-    }
     if let Ok(value) = HeaderValue::from_str(session) {
-        out.insert("x-opencode-session", value);
+        out.insert("x-opencode-session", value.clone());
+        out.insert("x-opencode-session-id", value.clone());
+        out.insert("x-session-affinity", value.clone());
+        out.insert("x-session-id", value);
     }
     if let Ok(value) = HeaderValue::from_str(ZEN_USER_AGENT) {
         out.insert(header::USER_AGENT, value);
     }
+    for (name, value) in tracing_headers() {
+        out.insert(name, value);
+    }
+    out.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+    out.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
+    out.insert(
+        header::ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, deflate"),
+    );
+}
+
+fn opencode_project(state: &ProxyState, session: &str) -> String {
+    state
+        .session_map
+        .codex_of(session)
+        .and_then(|thread_id| state.projects.get(&thread_id))
+        .unwrap_or_else(|| state.project_id.clone())
 }
 
 /// 构造转发给上游的请求头：保留入站头，剔除逐跳头，再按身份开关补识别头/UA。
@@ -2095,11 +2207,11 @@ fn method_has_body(method: &Method) -> bool {
     method != Method::GET && method != Method::HEAD && method != Method::OPTIONS
 }
 
-fn to_reqwest_method(method: &Method) -> reqwest::Method {
-    reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET)
+fn to_wreq_method(method: &Method) -> wreq::Method {
+    wreq::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(wreq::Method::GET)
 }
 
-async fn passthrough_response(resp: reqwest::Response) -> Response {
+async fn passthrough_response(resp: wreq::Response) -> Response {
     let status = resp.status();
     let headers = forwarded_response_headers(resp.headers());
     let stream = resp
@@ -2117,7 +2229,7 @@ async fn passthrough_response(resp: reqwest::Response) -> Response {
 /// 上游响应载体：2xx 保留可流式读取的响应；4xx 为判定 `stream_options` 兼容性
 /// 读出错误体时直接携带文本，避免二次读取。
 enum ForwardPayload {
-    Live(reqwest::Response),
+    Live(wreq::Response),
     Text(String),
 }
 
@@ -2905,7 +3017,7 @@ async fn forward(
     call_id: &str,
 ) -> Result<Forwarded, (StatusCode, String)> {
     let url = format!("{}/chat/completions", state.base_url.trim_end_matches('/'));
-    let client = http_client();
+    let client = http_client(state.opencode_identity);
     // 本会话发往上游的 x-opencode-session（同一 codex 线程在代理生命周期内恒定）
     let session = opencode_session(state, headers);
     // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
@@ -3083,14 +3195,14 @@ async fn forward(
 /// 构造发往 Zen 的 chat/completions 请求：识别头/UA 按「OpenCode 客户端身份」开关决定
 /// （见 [`apply_opencode_identity`]），Authorization 始终原样透传。
 fn build_chat_request(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     url: &str,
     state: &ProxyState,
     headers: &HeaderMap,
     session: &str,
     request_id: &str,
     body: &Value,
-) -> reqwest::RequestBuilder {
+) -> wreq::RequestBuilder {
     let mut rq = client.post(url).json(body);
     let mut identity = HeaderMap::new();
     apply_opencode_identity(&mut identity, headers, state, session, request_id);
@@ -3223,7 +3335,7 @@ fn note_chat_result(call: &mut TraceCall, chat: &Value) {
 /// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
 async fn proxy_json_response(
     req: Value,
-    resp: reqwest::Response,
+    resp: wreq::Response,
     log: &Option<Arc<SessionLog>>,
     strip_tags: bool,
     mut call: TraceCall,
@@ -3311,7 +3423,7 @@ async fn proxy_json_response(
 /// 这样「口嗨检测 + 续跑」才能把第二轮的事件续在同一个响应流里。
 /// `trace` 为这一轮的内容日志句柄（第一轮是入站 call，续跑轮各有自己的）。
 async fn pump_stream(
-    resp: reqwest::Response,
+    resp: wreq::Response,
     st: &mut StreamState,
     log: &ZenLog,
     tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -3425,7 +3537,7 @@ async fn proxy_stream_response(
     headers: HeaderMap,
     call_id: String,
     req: Value,
-    resp: reqwest::Response,
+    resp: wreq::Response,
     call: TraceCall,
 ) -> Response {
     let model = req
@@ -3486,7 +3598,7 @@ async fn run_stream_task(
     headers: HeaderMap,
     call_id: String,
     req: Value,
-    first_resp: reqwest::Response,
+    first_resp: wreq::Response,
     call: TraceCall,
     response_id: String,
     model: String,

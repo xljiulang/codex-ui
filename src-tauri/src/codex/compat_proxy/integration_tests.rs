@@ -17,6 +17,11 @@ struct Received {
     opencode_project: Option<String>,
     opencode_request: Option<String>,
     opencode_session: Option<String>,
+    opencode_session_id: Option<String>,
+    session_affinity: Option<String>,
+    session_id: Option<String>,
+    b3: Option<String>,
+    traceparent: Option<String>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -31,6 +36,32 @@ struct PassthroughReceived {
     opencode_project: Option<String>,
     opencode_request: Option<String>,
     opencode_session: Option<String>,
+    opencode_session_id: Option<String>,
+    session_affinity: Option<String>,
+    session_id: Option<String>,
+    b3: Option<String>,
+    traceparent: Option<String>,
+}
+
+fn assert_opencode_project_id(project: Option<&str>) {
+    let project = project.expect("应发送 x-opencode-project");
+    assert_eq!(project.len(), 40, "OpenCode 项目 id 应为 40 位：{project}");
+    assert!(
+        project.bytes().all(|b| b.is_ascii_hexdigit()),
+        "OpenCode 项目 id 应为十六进制：{project}"
+    );
+}
+
+fn assert_trace_headers(b3: Option<&str>, traceparent: Option<&str>) {
+    let b3 = b3.expect("应发送 b3");
+    let traceparent = traceparent.expect("应发送 traceparent");
+    let parts: Vec<&str> = b3.split('-').collect();
+    assert_eq!(parts.len(), 4, "b3 形状不合法：{b3}");
+    assert_eq!(parts[0].len(), 32);
+    assert_eq!(parts[1].len(), 16);
+    assert_eq!(parts[2], "1");
+    assert_eq!(parts[3].len(), 16);
+    assert_eq!(traceparent, format!("00-{}-{}-01", parts[0], parts[1]));
 }
 
 /// 起一个本地 mock Zen 服务，返回监听地址与接收记录。
@@ -64,6 +95,26 @@ async fn spawn_mock_zen(rec: Arc<AsyncMutex<Option<Received>>>) -> String {
                         .map(|s| s.to_string()),
                     opencode_session: headers
                         .get("x-opencode-session")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string()),
+                    opencode_session_id: headers
+                        .get("x-opencode-session-id")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string()),
+                    session_affinity: headers
+                        .get("x-session-affinity")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string()),
+                    session_id: headers
+                        .get("x-session-id")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string()),
+                    b3: headers
+                        .get("b3")
+                        .and_then(|h| h.to_str().ok())
+                        .map(|s| s.to_string()),
+                    traceparent: headers
+                        .get("traceparent")
                         .and_then(|h| h.to_str().ok())
                         .map(|s| s.to_string()),
                 });
@@ -128,6 +179,26 @@ async fn spawn_mock_passthrough(rec: Arc<AsyncMutex<Option<PassthroughReceived>>
                             .get("x-opencode-session")
                             .and_then(|h| h.to_str().ok())
                             .map(str::to_string),
+                        opencode_session_id: headers
+                            .get("x-opencode-session-id")
+                            .and_then(|h| h.to_str().ok())
+                            .map(str::to_string),
+                        session_affinity: headers
+                            .get("x-session-affinity")
+                            .and_then(|h| h.to_str().ok())
+                            .map(str::to_string),
+                        session_id: headers
+                            .get("x-session-id")
+                            .and_then(|h| h.to_str().ok())
+                            .map(str::to_string),
+                        b3: headers
+                            .get("b3")
+                            .and_then(|h| h.to_str().ok())
+                            .map(str::to_string),
+                        traceparent: headers
+                            .get("traceparent")
+                            .and_then(|h| h.to_str().ok())
+                            .map(str::to_string),
                     });
                     Json(json!({
                         "object": "list",
@@ -169,6 +240,26 @@ async fn spawn_mock_passthrough(rec: Arc<AsyncMutex<Option<PassthroughReceived>>
                                 .map(str::to_string),
                             opencode_session: headers
                                 .get("x-opencode-session")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            opencode_session_id: headers
+                                .get("x-opencode-session-id")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            session_affinity: headers
+                                .get("x-session-affinity")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            session_id: headers
+                                .get("x-session-id")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            b3: headers
+                                .get("b3")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            traceparent: headers
+                                .get("traceparent")
                                 .and_then(|h| h.to_str().ok())
                                 .map(str::to_string),
                         });
@@ -224,11 +315,14 @@ async fn forwards_chat_with_auth_and_user_agent() {
     assert_eq!(got.body["stream"], false);
     // 模拟 opencode 客户端的识别头
     assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
-    let req_id = got.opencode_request.as_deref().expect("应有请求 id");
-    assert_is_opencode_id(req_id, "msg");
+    assert_opencode_project_id(got.opencode_project.as_deref());
+    assert!(got.opencode_request.is_none());
+    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
     // 客户端没给 session-id：用代理级稳定会话（形状同样合法）
     assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -260,8 +354,12 @@ async fn forwards_chat_prefers_client_session_header() {
         Some("3f1a2b3c")
     );
     assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
-    assert_is_opencode_id(got.opencode_request.as_deref().expect("应有请求 id"), "msg");
+    assert_opencode_project_id(got.opencode_project.as_deref());
+    assert!(got.opencode_request.is_none());
+    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
+    assert_eq!(got.opencode_session_id.as_deref(), Some(session.as_str()));
+    assert_eq!(got.session_affinity.as_deref(), Some(session.as_str()));
+    assert_eq!(got.session_id.as_deref(), Some(session.as_str()));
 
     // 同一 codex 会话的后续请求发同一个 x-opencode-session，不同会话则不同
     let resp = forward(&req, &headers, false, &state, "req_test")
@@ -270,11 +368,8 @@ async fn forwards_chat_prefers_client_session_header() {
     assert!(resp.status.is_success());
     let again = rec.lock().await.clone().expect("mock 应已收到请求");
     assert_eq!(again.opencode_session.as_deref(), Some(session.as_str()));
-    assert_ne!(
-        again.opencode_request.as_deref(),
-        got.opencode_request.as_deref(),
-        "每条上游请求都应换新的 x-opencode-request"
-    );
+    assert_eq!(again.opencode_session_id.as_deref(), Some(session.as_str()));
+    assert_ne!(again.b3, got.b3, "每条请求都应生成新的追踪上下文");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -291,7 +386,8 @@ async fn forwards_without_auth_when_client_sends_none() {
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
     assert_eq!(got.authorization, None);
     assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
-    assert_is_opencode_id(got.opencode_request.as_deref().expect("应有请求 id"), "msg");
+    assert!(got.opencode_request.is_none());
+    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -303,6 +399,8 @@ async fn passthrough_forwards_models_and_post_body() {
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         log: None,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
@@ -334,10 +432,14 @@ async fn passthrough_forwards_models_and_post_body() {
     assert_eq!(got.authorization.as_deref(), Some("Bearer public"));
     assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
     assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
+    assert_opencode_project_id(got.opencode_project.as_deref());
     // 透传路径同样只需要合法形状：没带 session-id 时用代理级稳定会话
     assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
-    assert_is_opencode_id(got.opencode_request.as_deref().expect("应有请求 id"), "msg");
+    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
+    assert!(got.opencode_request.is_none());
+    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
 
     let uri: Uri = "/v1/echo".parse().unwrap();
     let resp = forward_passthrough(
@@ -364,6 +466,8 @@ async fn passthrough_prefers_client_session_header() {
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         log: None,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
@@ -682,6 +786,8 @@ fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
     ProxyState {
         session: "ses_fixed123".into(),
         base_url: upstream.to_string(),
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         log,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
@@ -1797,6 +1903,8 @@ fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyS
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
@@ -2201,6 +2309,8 @@ async fn learns_and_retries_reasoning_content_requirement() {
         opencode_identity: true,
         nudge_enabled: true,
         base_url: upstream,
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         log,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
@@ -2749,7 +2859,7 @@ async fn finish_without_more_chunks_times_out_and_completes() {
     let dir = tempfile::TempDir::new().unwrap();
     let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
     let base_url = spawn_mock_upstream_holding_open().await;
-    let resp = http_client()
+    let resp = http_client(true)
         .get(format!("{base_url}/stream"))
         .send()
         .await
@@ -3198,6 +3308,11 @@ async fn identity_switch_off_stops_headers_and_body_patch() {
         got.opencode_session, None,
         "关闭时连入站自带的同名头也要剔除"
     );
+    assert_eq!(got.opencode_session_id, None);
+    assert_eq!(got.session_affinity, None);
+    assert_eq!(got.session_id, None);
+    assert_eq!(got.b3, None);
+    assert_eq!(got.traceparent, None);
     // 诊断：请求行记 `身份伪装=off`，内容日志里的识别头一律记 `-`
     let joined = read_session_log(&dir);
     assert!(joined.contains("身份伪装=off"), "{joined}");
@@ -3226,10 +3341,54 @@ async fn identity_switch_on_keeps_headers_and_body_patch() {
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
     assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
     assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
-    assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
-    assert_is_opencode_id(got.opencode_request.as_deref().expect("应有请求 id"), "msg");
+    assert_opencode_project_id(got.opencode_project.as_deref());
+    assert!(got.opencode_request.is_none());
+    assert_trace_headers(got.b3.as_deref(), got.traceparent.as_deref());
     assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.opencode_session_id.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_affinity.as_deref(), Some("ses_fixed123"));
+    assert_eq!(got.session_id.as_deref(), Some("ses_fixed123"));
     assert!(got.body.get("max_tokens").is_some(), "{}", got.body);
+}
+
+/// 真实网络探针：使用与兼容代理完全相同的 wreq/BoringSSL 传输发送一次
+/// `big-pickle` 请求。默认忽略，避免 CI 联网；运行时需显式提供：
+/// - `CODEXUI_OPENCODE_API_KEY`
+/// - `CODEXUI_OPENCODE_BASE_URL`（默认新 OpenCode OpenAI 兼容路径）
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "真实 OpenCode 网络探针，需 API Key 且会消耗免费额度"]
+async fn live_opencode_214_big_pickle_probe() {
+    let key = std::env::var("CODEXUI_OPENCODE_API_KEY").ok();
+    let has_key = key.as_deref().is_some_and(|key| !key.trim().is_empty());
+    let base_url = std::env::var("CODEXUI_OPENCODE_BASE_URL")
+        .unwrap_or_else(|_| DEFAULT_COMPAT_BASE_URL.to_string());
+    let mut headers = HeaderMap::new();
+    if let Some(key) = key.as_deref().filter(|key| !key.trim().is_empty()) {
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {key}")).expect("API Key 不能包含非法头字符"),
+        );
+    }
+    headers.insert("session-id", HeaderValue::from_static("tls-probe-session"));
+    let state = proxy_state(base_url, None);
+    let req = json!({
+        "model": "big-pickle",
+        "input": "只回复 OK",
+        "stream": true
+    });
+    let forwarded = forward(&req, &headers, true, &state, "tls_probe")
+        .await
+        .expect("真实 OpenCode 请求应完成传输");
+    eprintln!(
+        "OPENCODE_214_PROBE status={} profile={}",
+        forwarded.status,
+        crate::codex::opencode_profile::OPENCODE_VERSION
+    );
+    if has_key {
+        assert_eq!(forwarded.status, StatusCode::OK);
+    } else {
+        assert_eq!(forwarded.status, StatusCode::UNAUTHORIZED);
+    }
 }
 
 /// 收尾约束关闭：终局即使「纯文本 + 零工具调用」也不注入、不续跑，只打一次上游；

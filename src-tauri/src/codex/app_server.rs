@@ -19,6 +19,7 @@ use crate::codex::compat_trace::{CompatTrace, TraceSink};
 use crate::codex::env_flags;
 use crate::codex::logs_guard;
 use crate::codex::model_config;
+use crate::codex::opencode_profile::ThreadProjectRegistry;
 use crate::codex::path_util::clean_path;
 use crate::codex::session_log::SessionLog;
 use crate::codex::settings::{self, AppSettings};
@@ -50,6 +51,8 @@ pub struct CodexServer {
     /// 「线程 id → 协作模式」协议登记表：由本层登记（`turn/start` 参数与
     /// `thread/settings/updated` 通知），供兼容代理精确判定协作模式，不再只靠关键词猜。
     thread_modes: Arc<compat_proxy::ThreadModeRegistry>,
+    /// `thread.id → OpenCode 项目 id` 登记表，由 thread/read/start/resume 响应更新。
+    thread_projects: Arc<ThreadProjectRegistry>,
     /// 后端自答的动态工具处理器（启动时注册一次）。未注册时 `item/tool/call` 全部转发前端。
     backend_tools: RwLock<Option<Arc<dyn BackendToolHandler>>>,
 }
@@ -203,6 +206,7 @@ impl CodexServer {
             codex_log,
             compat_trace,
             thread_modes: Arc::new(compat_proxy::ThreadModeRegistry::default()),
+            thread_projects: Arc::new(ThreadProjectRegistry::default()),
             backend_tools: RwLock::new(None),
         }
     }
@@ -402,13 +406,14 @@ impl CodexServer {
             Some(trace) => TraceSink::new(trace.clone()),
             None => TraceSink::disabled(),
         };
-        compat_proxy::apply(
+        compat_proxy::apply_with_projects(
             &mut inner.compat_proxy,
             enabled,
             compat_proxy::CompatProxyConfig::new(port, &base_url, opencode_identity, nudge_enabled),
             self.log.clone(),
             trace,
             self.thread_modes.clone(),
+            self.thread_projects.clone(),
         )
         .await
     }
@@ -807,6 +812,9 @@ impl CodexServer {
         self.log_file("info", thread.as_deref(), "rpc-request", &kv);
         let start = Instant::now();
         let res = self.request_verbose_inner(method, params, timeout).await;
+        if let Ok(value) = &res {
+            self.thread_projects.record_from_response(value);
+        }
         let dur_ms = start.elapsed().as_millis().to_string();
         let mut resp_kv = vec![
             ("method".to_string(), method.to_string()),

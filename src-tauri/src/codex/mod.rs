@@ -14,6 +14,7 @@ pub mod model_catalog;
 pub mod model_config;
 pub mod model_snapshots;
 pub mod notifications;
+pub(crate) mod opencode_profile;
 pub mod path_util;
 pub mod pdf_export;
 pub mod runtime_download;

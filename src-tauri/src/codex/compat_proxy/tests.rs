@@ -2520,7 +2520,7 @@ fn zen_body_patch_follows_identity_switch_only() {
     );
 }
 
-/// 身份开关落地到请求头：开时发四个识别头 + opencode UA；关时一个识别头都不发，
+/// 身份开关落地到请求头：开时发 OpenCode 2.1.4 的完整识别头；关时一个识别头都不发，
 /// 并把入站自带的同名头剔除、UA 透传入站值。
 #[test]
 fn opencode_identity_headers_follow_the_switch() {
@@ -2538,13 +2538,44 @@ fn opencode_identity_headers_follow_the_switch() {
         None,
         TraceSink::disabled(),
     );
+    let mapped_session = on
+        .session_map
+        .resolve("thread-project-test")
+        .expect("线程会话 id");
+    on.projects.record("thread-project-test", "a".repeat(40));
     let mut out = HeaderMap::new();
-    apply_opencode_identity(&mut out, &inbound, &on, "ses_fixed123", "msg_fixed");
+    apply_opencode_identity(&mut out, &inbound, &on, &mapped_session, "msg_fixed");
     assert_eq!(out.get("x-opencode-client").unwrap(), OPENCODE_CLIENT);
-    assert_eq!(out.get("x-opencode-project").unwrap(), OPENCODE_PROJECT);
-    assert_eq!(out.get("x-opencode-request").unwrap(), "msg_fixed");
-    assert_eq!(out.get("x-opencode-session").unwrap(), "ses_fixed123");
+    let project = out
+        .get("x-opencode-project")
+        .expect("必须发送项目 id")
+        .to_str()
+        .unwrap();
+    assert_eq!(project, "a".repeat(40), "应使用线程登记的项目 id");
+    assert_eq!(out.get("x-opencode-session").unwrap(), &mapped_session);
+    assert_eq!(out.get("x-opencode-session-id").unwrap(), &mapped_session);
+    assert_eq!(out.get("x-session-affinity").unwrap(), &mapped_session);
+    assert_eq!(out.get("x-session-id").unwrap(), &mapped_session);
+    assert!(out.get("x-opencode-request").is_none());
     assert_eq!(out.get(header::USER_AGENT).unwrap(), ZEN_USER_AGENT);
+    assert_eq!(out.get(header::ACCEPT).unwrap(), "*/*");
+    assert_eq!(out.get(header::ACCEPT_ENCODING).unwrap(), "gzip, deflate");
+    assert_eq!(out.get(header::CONNECTION).unwrap(), "keep-alive");
+    assert_eq!(ZEN_USER_AGENT, "opencode/latest/2.1.4/desktop");
+
+    let b3 = out.get("b3").expect("必须发送 b3").to_str().unwrap();
+    let traceparent = out
+        .get("traceparent")
+        .expect("必须发送 traceparent")
+        .to_str()
+        .unwrap();
+    let parts: Vec<&str> = b3.split('-').collect();
+    assert_eq!(parts.len(), 4, "b3 形状不合法：{b3}");
+    assert_eq!(parts[0].len(), 32);
+    assert_eq!(parts[1].len(), 16);
+    assert_eq!(parts[2], "1");
+    assert_eq!(parts[3].len(), 16);
+    assert_eq!(traceparent, format!("00-{}-{}-01", parts[0], parts[1]));
 
     let mut off = test_proxy_state(
         "ses_fixed123",

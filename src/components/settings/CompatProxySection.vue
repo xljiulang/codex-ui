@@ -16,7 +16,7 @@ import { openDocsUrl } from "../../lib/links";
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/inference/v1";
+const DEFAULT_BASE_URL = "https://opencode.ai/inference/openai/v1";
 /** 顶部说明里「Zen 免费模型」的文档地址（浏览器打开） */
 const ZEN_DOCS_URL = "https://opencode.ai/zen";
 
@@ -213,7 +213,7 @@ onBeforeUnmount(refresh);
             type="text"
             class="compat-proxy-url-input"
             :value="apiUrlInput"
-            placeholder="https://opencode.ai/inference/v1"
+            placeholder="https://opencode.ai/inference/openai/v1"
             @input="apiUrlInput = ($event.target as HTMLInputElement).value"
           />
         </div>
@@ -239,7 +239,7 @@ onBeforeUnmount(refresh);
               type="checkbox"
             />
             <label for="compat-proxy-identity">
-              OpenCode 客户端身份（补齐与 OpenCode 一致的请求头和工具集）
+              OpenCode 客户端身份（补齐 2.1.4 请求头、工具集与 TLS 指纹）
             </label>
           </div>
         </div>

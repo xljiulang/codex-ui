@@ -107,7 +107,9 @@ describe("CompatProxySection", () => {
     expect(badge.classes()).toContain("badge-accent");
     const capsule = wrapper.find(".compat-proxy-base-url-capsule");
     expect(capsule.exists()).toBe(true);
-    expect(capsule.text()).toContain("http://127.0.0.1:18080/inference/v1");
+    expect(capsule.text()).toContain(
+      "http://127.0.0.1:18080/inference/openai/v1",
+    );
   });
 
   it("点击胶囊复制 base_url 并提示", async () => {
@@ -115,7 +117,7 @@ describe("CompatProxySection", () => {
     const wrapper = mountSection();
     await wrapper.find(".compat-proxy-base-url-capsule").trigger("click");
     expect(mockCopyText).toHaveBeenCalledWith(
-      "http://127.0.0.1:18080/inference/v1",
+      "http://127.0.0.1:18080/inference/openai/v1",
     );
     expect(mockedToast).toHaveBeenCalledWith("已复制 base_url");
   });
@@ -131,9 +133,11 @@ describe("CompatProxySection", () => {
   it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
     store.settings.compat_proxy_enabled = true;
     const wrapper = mountSection();
-    // 默认上游 https://opencode.ai/inference/v1 → 本机地址 + /inference/v1
+    // 默认上游 → 本机地址 + 相同路径
     const value = () => wrapper.find(".compat-proxy-base-url-capsule");
-    expect(value().text()).toContain("http://127.0.0.1:18080/inference/v1");
+    expect(value().text()).toContain(
+      "http://127.0.0.1:18080/inference/openai/v1",
+    );
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://api.deepseek.com/");
     expect(value().text()).toContain("http://127.0.0.1:18080");
@@ -157,7 +161,7 @@ describe("CompatProxySection", () => {
     expect(texts[0]).toContain("回合收尾约束和助推");
     expect(texts[0]).toContain("模型空转收尾时自动续跑");
     expect(texts[1]).toContain("OpenCode 客户端身份");
-    expect(texts[1]).toContain("补齐与 OpenCode 一致的请求头和工具集");
+    expect(texts[1]).toContain("补齐 2.1.4 请求头、工具集与 TLS 指纹");
     // 身份开关不再按上游分流：括号说明里不该再出现「对 opencode 上游」这类前提
     expect(texts[1]).not.toContain("opencode 上游");
     const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
@@ -196,7 +200,7 @@ describe("CompatProxySection", () => {
       {
         enabled: false,
         port: 18080,
-        baseUrl: "https://opencode.ai/inference/v1",
+        baseUrl: "https://opencode.ai/inference/openai/v1",
         nudgeEnabled: false,
         identityEnabled: false,
       },
@@ -228,7 +232,7 @@ describe("CompatProxySection", () => {
     expect(mockedToggle).toHaveBeenCalledWith({
       enabled: true,
       port: 18080,
-      baseUrl: "https://opencode.ai/inference/v1",
+      baseUrl: "https://opencode.ai/inference/openai/v1",
       nudgeEnabled: true,
       identityEnabled: true,
     });

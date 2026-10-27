@@ -30,6 +30,8 @@ pub(crate) fn test_proxy_state(
     ProxyState {
         session: session.to_string(),
         session_map: Arc::new(SessionMap::default()),
+        project_id: crate::codex::opencode_profile::current_project_id(),
+        projects: Arc::new(crate::codex::opencode_profile::ThreadProjectRegistry::default()),
         base_url: base_url.to_string(),
         log,
         trace,

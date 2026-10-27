@@ -407,24 +407,25 @@
 
 ### 兼容代理
 
-- **兼容代理（设置 → 兼容代理）**：在 `127.0.0.1` 开放一个 OpenAI Responses API 端点，内部翻译为 Chat Completions 并转发到 OpenCode Zen（默认 `https://opencode.ai/inference/v1`），让 codex 无需 `wire_api="chat"` 即可使用 Zen 免费模型；**2026-10-15 起上游把免费层门禁搬到了 `/inference/v1`：同一份请求（连 opencode 客户端报文逐字回放）打旧的 `https://opencode.ai/zen/v1` 一律被 `403 FreeTierError` 拒绝**，默认值已随之迁移；历史配置里仍是 `/zen/v1` 的需在设置页手动改成 `/inference/v1`（保存即重启生效，本次不做存量自动迁移）；
+- **兼容代理（设置 → 兼容代理）**：在 `127.0.0.1` 开放一个 OpenAI Responses API 端点，内部翻译为 Chat Completions 并转发到 OpenCode Console（默认 `https://opencode.ai/inference/openai/v1`）。默认端点已跟随 OpenCode 2.1.4 迁移；按用户选择**不自动迁移存量设置**，旧地址需在设置页手动修改。模型目录对 OpenCode 新路径自动回退到 `https://opencode.ai/inference/v1/models`；
 - **模型协议自动判定（无需开关）**：Zen 里有相当一批模型是 **Responses 原生**（文档 endpoint 列 `/inference/v1/responses`：`muse-spark-*`、`gpt-5.x/6.x`、`grok-4.x` 等共 31 个），它们不支持 chat —— 代理**默认先按 chat 翻译**，一旦上游以 `400 ModelProtocolUnsupported`（`Model does not support this protocol.`）拒绝，就**就地改走 Responses 直通重发一次**，并把「该 model id ↔ 协议」**粘滞记住**（进程内，代理重启后重学一次；换上游/端口会重启代理，记忆自然清空）。反过来若上游不接受 Responses，也会自动改回 chat 翻译。其它 4xx（401/403/429/地区限制等）一律不改判、不写记忆。首次遇到 Responses 模型会多一次上游 400 往返（发生在代理内部、未产生计费、客户端无感），此后直接走对的协议；逐请求可在 `compat_proxy.protocol protocol=chat|responses reason=default|learned` 核对，学到新协议时记 `compat_proxy.protocol_switched`；
 - **两个行为开关**（设置页兼容代理卡片内，都是复选框、**默认勾选**，与端口/base_url 一起点「保存」才生效——保存即重启代理）：
   - **`回合收尾约束和助推（模型空转收尾时自动续跑）`**：控制「口嗨检测与自动续跑」整条链路——首轮收尾契约教学、终局判定与续跑提醒、以及 `<zen_task_completed>` 等收尾标签的剥离；关闭后代理只做协议翻译，终局怎么收尾完全由上游决定（`compat_proxy.nudge_skipped 原因=disabled`），模型就算写出这类标签也原样显示在聊天里。**与上游域名无关**，指向任何上游都按这个开关走；
-  - **`OpenCode 客户端身份（补齐与 OpenCode 一致的请求头和工具集）`**：控制全部伪装能力——`x-opencode-client` / `-project` / `-request` / `-session` 四个识别头、opencode 固定 User-Agent，以及 `max_tokens` + 6 个内置工具声明（`bash` / `edit` / `glob` / `grep` / `read` / `write`，每个都带真实参数 schema）的请求体门禁补丁。**勾选即对所有上游（Zen / 自建 / 第三方兼容端点）一律生效，不再判断上游 host**；关闭后翻译路径与透传路径都不发任何识别头（入站自带的同名头也会被剔除，避免仍然"自称 opencode"），UA 改为**透传入站请求的 User-Agent**（入站没有就不带 UA），请求体一个门禁字段都不补。诊断口径：`compat_proxy.forward` 的 `身份伪装=on|off`，内容日志里的 `identity=on|off`、`x_opencode_session` / `x_opencode_request`（未发送时记 `-`）；
-- **翻译入口路径 = 模型提供方 base_url 的路径 + `/responses`**（`…/inference/v1` → `/inference/v1/responses`，base_url 无路径 → `/responses`，一律不锁死 `/v1`；
+  - **`OpenCode 客户端身份（补齐 2.1.4 请求头、工具集与 TLS 指纹）`**：控制全部客户端兼容能力——OpenCode 2.1.4 的 User-Agent、项目/会话识别头、`b3`/`traceparent`、Bun 1.4.4 + BoringSSL 的 TLS ClientHello，以及 `max_tokens` + 6 个内置工具声明。**勾选即对所有上游一律生效，不判断 host**；关闭后不发识别头、不套 TLS profile、不补请求体门禁字段，UA 透传入站值。API Key 仍由模型提供者配置中的 `experimental_bearer_token` 提供并经入站 `Authorization` 原样转发，不读取或持久化 OpenCode OAuth；
+- **翻译入口路径 = 模型提供方 base_url 的路径 + `/responses`**（`…/inference/openai/v1` → `/inference/openai/v1/responses`，base_url 无路径 → `/responses`，一律不锁死 `/v1`；
   本地 provider 的 base_url 路径必须与「模型提供方的 base_url」一致，只把 host 换成本机代理），判定不看方法以外的任何猜测；
 - **角色映射**：Responses 的 `developer` 角色在 Chat Completions 侧统一降级为 `system`
   （codex 用 `developer` 下发开发者消息，而 DeepSeek 等兼容端点只认 `system`/`user`/`assistant`/`tool`，会直接 400 `unknown variant developer`），其余角色原样透传；
 - **除该入口外的所有路径/方法都零路径转换透传**——只把 scheme/host/port 换成上游，入站 path 与 query 原样发出（如上游无路径时 `GET /models` → `{上游}/models`），保留 method/query/body/Authorization 等请求信息并附加 opencode 识别头（**识别头与 UA 同样受「OpenCode 客户端身份」开关控制**，两条路径共用一套口径），非 2xx 原样透传；
 - 请求走了翻译还是透传由日志回答：`compat_proxy.passthrough method=… path=… status=…`（2xx info、其余 warn），客户端把 `/responses` 打到非期望路径时另记 `compat_proxy.path_unmatched path=… expected=…`（本地 provider 路径与上游不一致时直接给出期望值）；
 - **上游地址末尾带不带 `/` 都兼容**（`https://a/` 与 `https://a` 等价，路由派生与重启判定都按归一化后的值），且**在设置页保存「模型提供方的 base_url」或端口即重启生效**，无需重启 codex-ui；端口默认 `18080` 可在设置页修改，运行状态实时展示；
-- Zen base URL 固定；**默认**发固定的 opencode User-Agent（`opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24`，可由「OpenCode 客户端身份」开关关闭，见上），API Key 不固定——读取客户端请求的 `Authorization` 头原样转发，
-  因此在模型配置页为 provider 填 `experimental_bearer_token = "public"` 即可；
-- 代理向上游附加 opencode 客户端识别头（`x-opencode-client: desktop`、`x-opencode-project: global`、每条上游请求随机的 `x-opencode-request: msg_*`、
-  `x-opencode-session`）——**两者都按真实 opencode 客户端的 ID 规则生成**：`msg_` / `ses_` 之后固定 26 位 `[0-9A-Za-z]`（前 12 位是时间戳低 6 字节的小写十六进制、后 14 位随机，复刻 `sst/opencode` 的 `Identifier.create`）；
+- 兼容代理使用 `wreq 0.15.3` + BoringSSL 作为上游传输；身份开启时使用实测的 OpenCode 2.1.4 TLS/HTTP1 指纹。**默认**发 `opencode/latest/2.1.4/desktop` User-Agent，API Key 读取客户端请求的 `Authorization` 头原样转发，
+  因此请在模型配置页为 provider 填写自己的 OpenCode API Key；兼容代理不会替换、读取或持久化该凭据；
+- **BoringSSL 构建前置**：首次编译需要 CMake 3.22+、NASM 与 `libclang.dll`。Windows 可使用 Visual Studio 自带 CMake/Ninja；若它们不在 PATH，设置 `CMAKE`、`LIBCLANG_PATH` 与 NASM 目录后再运行 Cargo。GitHub Actions 的 Windows runner 同样需要 NASM；
+- **抓包注意**：HTTP Debugger/mitmproxy 等 HTTPS 中间人会替换 ClientHello 的 TLS 栈，导致 OpenCode 或 codex-ui 被服务端按受限流量处理。验证指纹和免费模型时须关闭 `opencode.ai` 的 HTTPS 解密或直接关闭该抓包代理；
+- 代理向上游附加 OpenCode 2.1.4 识别头：`x-opencode-client: desktop`、按当前线程工作区计算的 40 位 `x-opencode-project`、同一 `ses_*` 的四份会话别名 `x-opencode-session` / `x-opencode-session-id` / `x-session-affinity` / `x-session-id`，以及与之一致的 `b3` / `traceparent`；
   Zen 免费层会校验这个形状（旧写法 `ses_` + 裸 codex 线程 id、18 位随机串会被判成「非 opencode 客户端」并以 `403 FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒绝；
-  2026-10-15 实测口径更细：前 12 位必须是**小写十六进制**（大写十六进制、全 `a` 都被拒），且 User-Agent 必须是 `opencode/1.18.29 …` 这一支——发 `opencode/1.19.0` 反而被拒，故 UA 仍按上面写死的值发送）；
+  OpenCode 2.1.4 的项目 id 按官方算法生成：Git 仓库取规范化 origin 的 `sha1("git-remote:" + host/path)`，非 Git 目录取 `sha1("directory:" + canonical)`；
   `x-opencode-session` 由客户端请求头 `session-id`（codex 线程 id）**经进程内双向映射表**得到：同一线程在代理生命周期内恒定发同一个 `ses_*`，不同线程互不相同，可反查回线程 id（代理重启后重新分配）；
   请求头缺失、空白或非可见 ASCII 时回落到代理启动时生成、生命周期内稳定的 `ses_*`；
 - **请求体形状补丁（免费层门禁的第二道）**：2026-09-18 起，识别头已经合法的请求仍会被以同一条 `403 FreeTierError` 拒绝——门禁搬到了请求体，于是**翻译路径**给发往上游的 `chat/completions` 再补两样东西（透传路径一个字段都不动）：
@@ -433,7 +434,7 @@
     - **为什么带真实参数（2026-10-15 起的新门禁口径）**：门禁除名字外还要求 `parameters.properties` 是**非空对象**——此前那版「空对象 schema」的假工具一个都不计数，于是请求必被 403（这正是 10-15 当天 32 次 `FreeTierError` 的直接原因）；换成非空 schema 立刻放行。合格条数**至少 5 个**（实测 1~4 个一律 403、5 个起放行），且只认这 6 个名字（`task` / `todowrite` 等其它内置名、`foo1` 这类杂名都不计数）。描述文本、参数具体内容、`max_tokens`、`tool_choice`、`stream_options`、系统提示词都不参与判定，但保留真实 schema 最稳（上游若哪天校验更深一层也仍然一致）；逐请求可用 `compat_proxy.zen_tools gate_tools=N` 核对（`N < required` 时警告：这条请求注定被上游 403）；**上游同时要求请求体的 `stream` 为 `true`**——同形状请求把 `stream` 改成 `false` 立刻 403，故翻译路径在客户端要非流式时记一条 `compat_proxy.zen_stream_required`（只告警，不改变转发语义：非流式请求发往 Zen 免费层必然 403）；
   - **生效范围 = 「OpenCode 客户端身份」开关一项，且对上面两项一视同仁**：开即补 `max_tokens` 与这 6 个工具声明（同一个开关，做不到只开其中一项），关即两者都不补；**不再按上游 host 分流**——把 base_url 换成自建/第三方兼容端点（DeepSeek 等）时，只要身份开关还开着就照补（不再需要时请直接关掉该开关）。**客户端自己**通过 `max_output_tokens` 指定的预算不受此限——那是既有的标量映射，照旧发往任意上游；逐请求可在 `compat_proxy.forward` 行的 `身份伪装=on|off` 核对，补丁后的实发请求体见 `logs/compat/*.request.json`；
   - 代价：每个请求多约 4 KB 的恒定工具声明（6 个真实参数 schema，位置固定在尾部，可被上游缓存）与一小段动态教学文本；无工具声明的后台请求（会话标题、压缩/摘要）同样会看到这些工具，弱模型存在误调假工具的残余风险——所以有工具 description + system 消息教学双重劝退；
-- **Responses 直通路径（自动判定该模型只支持 Responses 时）**：请求体**除门禁补丁外逐字转发**到上游同一路径（`…/inference/v1/responses`），上游 SSE 逐字回传给 codex ——
+- **Responses 直通路径（自动判定该模型只支持 Responses 时）**：请求体**除门禁补丁外逐字转发**到上游同一路径（当前 OpenCode profile 为 `…/inference/v1/responses`），上游 SSE 逐字回传给 codex ——
   - 身份开关开启时按 **Responses 形状**补门禁：`tools` 不足 5 个合格声明时在末尾补 6 个内置工具（`{type:"function", name, description:"这是弃用的工具，请勿调用", parameters:<真实 schema>, strict:false}`），并把「弃用工具声明」教学并入顶层 `instructions`（幂等）；补完仍不足时记 `compat_proxy.zen_tools gate_tools=N required=5`；
   - 实测 codex 的 `namespace` 工具与 `store` / `include` / `prompt_cache_key` / `reasoning` / `text` 字段上游都原样接受，因此**不做任何其它改写**：不展开命名空间（codex-ui 动态工具分组在上游侧保持原样，模型能否调用由上游决定）、不净化历史、不改 `stream`；身份开关关闭时一个字段都不动；
   - **翻译专属能力在这条路径上不参与**：收尾契约教学、口嗨续跑、收尾标签剥离、历史净化、畸形工具调用保护、usage 明细映射、命名空间展开都不生效 —— 开着「回合收尾约束和助推」时记 `compat_proxy.nudge_skipped 原因=responses_protocol`，避免"看着开了实际没生效"；
@@ -473,11 +474,11 @@
     该轮没有回放思维链时补空串（实测同样接受）。
   - 是否回传由**学习式开关**决定——上游第一次以"缺 `reasoning_content`"报错时自动打开并内部重试一次（记 `compat_proxy.reasoning_content_enabled`），开关粘滞到本次代理实例结束，且**一次请求内最多翻转一次**（上游若反过来不接受该字段则自动关闭，记 `compat_proxy.reasoning_content_disabled`）；
   - 失败尝试逐条记 `compat_proxy.forward_attempt`（`attempt`/`status`/错误原文 + `messages`/`assistant_with_tools_rc`/`assistant_with_content_rc` 形态统计），`compat_proxy.forward` 另有 `reasoning_rc=on|off` 与 `身份伪装=on|off`（本次是否按 opencode 客户端发请求头并补免费层门禁字段）供逐请求核对；
-  - 启用后在「模型配置」页手动添加 provider：
+- 启用后在「模型配置」页手动添加 provider：
     `base_url = http://127.0.0.1:{端口}{模型提供方 base_url 的路径}`
-    （默认上游是 `https://opencode.ai/inference/v1`，故填 `http://127.0.0.1:{端口}/inference/v1`；
+    （默认上游是 `https://opencode.ai/inference/openai/v1`，故填 `http://127.0.0.1:{端口}/inference/openai/v1`；
     上游填 DeepSeek 官方地址这类无路径的地址时直接填 `http://127.0.0.1:{端口}`）、
-    `wire_api = "responses"`、`experimental_bearer_token = "public"`，模型名填 Zen 支持的 ID（原样透传）；
+    `wire_api = "responses"`、`experimental_bearer_token` 填自己的 OpenCode API Key，模型名填 Zen 支持的 ID（原样透传）；
 
 #### 兼容代理：命名空间工具翻译
 
