@@ -8,6 +8,7 @@ import {
 } from "../../lib/serverMessages";
 import {
   type CodexMessageEvent,
+  type CollabAgentToolCallItem,
   type ErrorItem,
   isThreadItemType,
   type AgentMessageItem,
@@ -16,6 +17,7 @@ import {
   type ReasoningItem,
   type ScheduledTask,
   type ServerStatus,
+  type SubAgentActivityItem,
   type ThreadItem,
 } from "../../lib/types";
 import { sessionLog } from "../../lib/sessionLog";
@@ -33,6 +35,10 @@ import {
   sessionTabTitle,
 } from "./sessionState";
 import { isBackgroundThread, store } from "./store";
+import {
+  registerSubagentThread,
+  subagentParentThread,
+} from "./subagentThreads";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { mirrorHistoryItem } from "./history";
@@ -125,6 +131,32 @@ function notifyErrorItem(
   notifySessionError({ message, threadId, turnId });
 }
 
+function registerChildThreadsFromItem(
+  item: ThreadItem,
+  parentThreadId: string,
+) {
+  if (isThreadItemType<CollabAgentToolCallItem>(item, "collabAgentToolCall")) {
+    const parent = item.senderThreadId?.trim() || parentThreadId;
+    for (const childThreadId of item.receiverThreadIds ?? []) {
+      registerSubagentThread({
+        id: childThreadId,
+        source: "subagent",
+        parentThreadId: parent,
+      });
+    }
+    return;
+  }
+  if (isThreadItemType<SubAgentActivityItem>(item, "subAgentActivity")) {
+    if (item.agentThreadId) {
+      registerSubagentThread({
+        id: item.agentThreadId,
+        source: "subagent",
+        parentThreadId,
+      });
+    }
+  }
+}
+
 export async function wireEvents() {
   if (wired) return;
   wired = true;
@@ -159,7 +191,8 @@ export async function wireEvents() {
       // 无 threadId 或线程未打开时回退全局列表（由活动标签展示）
       const threadId =
         typeof p.params?.threadId === "string" ? p.params.threadId : undefined;
-      const tab = findSessionTabByThread(threadId);
+      const routeThreadId = subagentParentThread(threadId) ?? threadId;
+      const tab = findSessionTabByThread(routeThreadId);
       if (tab) {
         tab.interactions.push({ ...p, at: Date.now() });
       } else {
@@ -168,7 +201,7 @@ export async function wireEvents() {
       // 窗口没有前台焦点时发系统通知（应用内气泡行为不变；无会话归属时不发）
       notifySessionInteraction({
         kind: interactionKindForMethod(p.method),
-        threadId,
+        threadId: routeThreadId,
       });
     }),
   );
@@ -367,6 +400,7 @@ export async function wireEvents() {
         turnId?: string;
         startedAtMs?: number;
       };
+      registerChildThreadsFromItem(p.item, p.threadId);
       if (isBackgroundThread(p.threadId)) return;
       notifyErrorItem(p.item, p.threadId, p.turnId);
       const item = {
@@ -383,6 +417,7 @@ export async function wireEvents() {
         turnId?: string;
         completedAtMs?: number;
       };
+      registerChildThreadsFromItem(p.item, p.threadId);
       if (isBackgroundThread(p.threadId)) return;
       notifyErrorItem(p.item, p.threadId, p.turnId);
       // 优先用服务端提供的耗时；缺失时用 startedAtMs→completedAtMs 推算，
@@ -660,6 +695,7 @@ export async function wireEvents() {
   unlisteners.push(
     await listen("thread/name/updated", (e) => {
       const p = e.payload as { threadId: string; threadName?: string };
+      if (isBackgroundThread(p.threadId)) return;
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.name = p.threadName ?? null;
       const tab = findSessionTabByThread(p.threadId);
@@ -684,6 +720,7 @@ export async function wireEvents() {
           modelContextWindow?: number | null;
         };
       };
+      if (isBackgroundThread(p.threadId)) return;
       // 会话累计的输入/输出/细分 token（用于输入区圆环菜单展示）；缺省不写，避免污染为 undefined
       const t = p.tokenUsage?.total;
       const totalInput = t?.inputTokens;
@@ -712,6 +749,7 @@ export async function wireEvents() {
     }),
     await listen("thread/status/changed", (e) => {
       const p = e.payload as { threadId: string; status: { type: string } };
+      if (isBackgroundThread(p.threadId)) return;
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.status = p.status;
     }),
@@ -754,8 +792,23 @@ export async function wireEvents() {
       tab.goalArmed = false;
     }),
     await listen("thread/started", (e) => {
-      const p = e.payload as { thread?: { id?: string } };
+      const p = e.payload as {
+        thread?: {
+          id?: string;
+          source?: string;
+          parentThreadId?: string | null;
+          ephemeral?: boolean;
+          agentNickname?: string | null;
+          agentRole?: string | null;
+        };
+      };
       if (isBackgroundThread(p?.thread?.id)) return; // 临时线程不触发历史刷新
+      if (
+        p.thread?.id &&
+        registerSubagentThread({ ...p.thread, id: p.thread.id }) !== null
+      ) {
+        return;
+      }
       void refreshThreads();
     }),
   );

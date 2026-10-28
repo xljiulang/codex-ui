@@ -568,6 +568,34 @@ describe("ToolCard 头部图标", () => {
   });
 });
 
+describe("子代理协作卡片", () => {
+  it("折叠状态汇总子代理数量与运行结果", () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "collab-1",
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          status: "inProgress",
+          receiverThreadIds: ["a", "b", "c"],
+          agentsStates: {
+            a: { status: "running", message: null },
+            b: { status: "completed", message: null },
+            c: { status: "errored", message: "失败" },
+          },
+        } as ThreadItem,
+      },
+    });
+
+    const summary = wrapper.find(".tool-agent-summary");
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain("3 个子代理");
+    expect(summary.text()).toContain("运行 1");
+    expect(summary.text()).toContain("完成 1");
+    expect(summary.text()).toContain("失败 1");
+  });
+});
+
 describe("dynamicToolCall 结果渲染", () => {
   it("contentItems 渲染到 tool-output，空参数不显示 tool-json", async () => {
     const wrapper = mount(ToolCard, {

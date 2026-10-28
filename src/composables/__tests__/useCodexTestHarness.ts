@@ -5,6 +5,7 @@ import { tabs as _tabs } from "../useEditorTabs";
 import { disposeEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
+import { __resetSubagentThreadsForTest } from "../useCodex/subagentThreads";
 import type { ModelInfo, SessionTab } from "../useCodex/types";
 
 export const capturedListeners: Record<
@@ -187,6 +188,7 @@ export function resetUseCodexState(
     return Promise.resolve(undefined);
   });
   __resetSessionTabsForTest();
+  __resetSubagentThreadsForTest();
   store.booting = true;
   store.lastWorkspace = "";
 }
