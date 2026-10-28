@@ -7,6 +7,7 @@ import { getPinnedSectionId, sortThreads } from "./pinnedSection";
 import { resolveSessionWorkspace } from "./items";
 import { findSessionTabByThread, sessionTabTitle } from "./sessionState";
 import { backgroundThreadIds, store } from "./store";
+import { registerSubagentThread } from "./subagentThreads";
 import { setToast, toastError } from "./toast";
 
 export function isThreadNotFound(e: unknown): boolean {
@@ -29,7 +30,9 @@ export async function refreshThreads() {
         cursor,
       });
       const page = res.data ?? [];
-      all.push(...page);
+      for (const thread of page) {
+        if (registerSubagentThread(thread) === null) all.push(thread);
+      }
       cursor = res.nextCursor ?? null;
       if (!cursor || page.length === 0) break;
     }
@@ -47,6 +50,7 @@ export async function refreshThreads() {
  * 后续 refreshThreads 会以服务端权威数据整体替换。
  */
 export function upsertThreadSummary(summary: ThreadSummary) {
+  if (registerSubagentThread(summary) !== null) return;
   const idx = store.threads.findIndex((x) => x.id === summary.id);
   if (idx >= 0) {
     store.threads[idx] = summary;
@@ -87,9 +91,12 @@ export async function searchThreads(term: string) {
       if (!cursor || page.length === 0) break;
     }
     const snippets: Record<string, string> = {};
-    for (const r of all) snippets[r.thread.id] = r.snippet ?? "";
+    const visible = all.filter(
+      (result) => registerSubagentThread(result.thread) === null,
+    );
+    for (const r of visible) snippets[r.thread.id] = r.snippet ?? "";
     store.searchSnippets = snippets;
-    store.threads = sortThreads(all.map((r) => r.thread));
+    store.threads = sortThreads(visible.map((r) => r.thread));
     store.searchActive = true;
   } catch (e) {
     setToast(toastError(e));

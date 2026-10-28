@@ -17,6 +17,7 @@ import {
   unregisterComposerAddHandler,
 } from "../useCodex/sessionTabs";
 import { store } from "../useCodex/store";
+import { registerSubagentThread } from "../useCodex/subagentThreads";
 import { startTurnForTab, interrupt } from "../useCodex/turnControl";
 import type { SessionTab } from "../useCodex/types";
 import { tabs as _tabs, activeTabId } from "../useEditorTabs";
@@ -162,6 +163,99 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
       params: { threadId: "t2" },
     });
     expect(activeSessionTab()?.resumedThreadId).toBe("t2");
+  });
+
+  it("子代理线程不能创建会话标签", async () => {
+    store.threads = [];
+    store.toast = "";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: {
+            id: "child",
+            name: "子代理",
+            source: "subagent",
+            parentThreadId: "parent",
+            turns: [],
+          },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    expect(await openSessionTabForThread("child")).toBe(false);
+    expect(tabs).toHaveLength(0);
+    expect(store.toast).toContain("子代理活动仅在主对话中显示");
+  });
+
+  it("已登记子线程在创建骨架标签前直接拒绝", async () => {
+    registerSubagentThread({
+      id: "child",
+      source: "subagent",
+      parentThreadId: "parent",
+    });
+
+    expect(await openSessionTabForThread("child")).toBe(false);
+    expect(tabs).toHaveLength(0);
+    expect(
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "thread_read"),
+    ).toHaveLength(0);
+    expect(store.toast).toContain("子代理活动仅在主对话中显示");
+  });
+
+  it("已存在的子线程标签再次打开时被移除", async () => {
+    const childTab = makeSessionTab("child-tab", "child", {
+      turnActive: true,
+      currentTurnId: "child-turn",
+    });
+    tabs.push(childTab);
+    activeTabId.value = childTab.id;
+    registerSubagentThread({
+      id: "child",
+      source: "subagent",
+      parentThreadId: "parent",
+    });
+
+    expect(await openSessionTabForThread("child")).toBe(false);
+    expect(tabs.some((tab) => tab.threadId === "child")).toBe(false);
+  });
+
+  it("未知子线程在元数据确认前不创建瞬时标签", async () => {
+    let resolveRead!: (value: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_read") {
+        return new Promise((resolve) => {
+          resolveRead = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const opening = openSessionTabForThread("unknown-child");
+    await flushPromises();
+    expect(tabs).toHaveLength(0);
+
+    resolveRead({
+      thread: {
+        id: "unknown-child",
+        source: "subagent",
+        parentThreadId: "parent",
+        turns: [],
+      },
+    });
+    expect(await opening).toBe(false);
+    expect(tabs).toHaveLength(0);
+    expect(
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "thread_read"),
+    ).toHaveLength(1);
   });
 
   it("带活跃目标：打开不调用 thread_resume，resumedThreadId 保持 null", async () => {

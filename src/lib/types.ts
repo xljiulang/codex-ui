@@ -27,6 +27,10 @@ export interface ThreadSummary {
   recencyAt?: number | null;
   cwd?: string;
   source?: string;
+  parentThreadId?: string | null;
+  ephemeral?: boolean;
+  agentNickname?: string | null;
+  agentRole?: string | null;
   cliVersion?: string;
   /** 线程历史存储模式：legacy（codex-ui 创建）| paginated（codex CLI 创建） */
   historyMode?: string | null;
@@ -52,6 +56,11 @@ export interface ThreadRead {
     name?: string | null;
     preview?: string;
     cwd?: string | null;
+    source?: string | null;
+    parentThreadId?: string | null;
+    ephemeral?: boolean;
+    agentNickname?: string | null;
+    agentRole?: string | null;
     /** legacy | paginated；分页线程不支持 includeTurns=true，须用 thread/turns/list 分页读取 */
     historyMode?: string | null;
     turns?: Turn[];
@@ -520,7 +529,17 @@ export interface CommandExecutionItem extends ThreadItemBase {
 /** 子代理协作调用（字段形状同动态工具，宽松访问） */
 export interface CollabAgentToolCallItem extends ThreadItemBase {
   type: "collabAgentToolCall";
+  tool?: string;
   status?: string;
+  senderThreadId?: string;
+  receiverThreadIds?: string[];
+  prompt?: string | null;
+  model?: string | null;
+  reasoningEffort?: string | null;
+  agentsStates?: Record<
+    string,
+    { status?: string; message?: string | null } | undefined
+  >;
   result?: unknown;
   error?: { message?: string } | null;
 }

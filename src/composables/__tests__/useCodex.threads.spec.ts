@@ -10,8 +10,10 @@ import {
 import { store } from "../useCodex/store";
 import {
   autoTitleThread,
+  refreshThreads,
   renameThread,
   sanitizeTitle,
+  searchThreads,
   setThreadPinned,
   upsertThreadSummary,
 } from "../useCodex/threads";
@@ -26,7 +28,7 @@ import {
 } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -58,6 +60,93 @@ const mockedListen = vi.mocked(listen);
 
 beforeEach(() => {
   resetUseCodexState(mockedInvoke, mockedListen);
+});
+
+describe("子代理线程不进入历史会话", () => {
+  afterEach(() => {
+    store.searchActive = false;
+    store.searchSnippets = {};
+  });
+
+  it("thread_list 返回子线程时只保留普通会话", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({
+          data: [
+            {
+              id: "parent",
+              name: "父会话",
+              createdAt: 1,
+              recencyAt: 2,
+              source: "appServer",
+            },
+            {
+              id: "child",
+              name: "子代理",
+              createdAt: 2,
+              recencyAt: 3,
+              source: "subagent",
+              parentThreadId: "parent",
+            },
+          ],
+          nextCursor: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await refreshThreads();
+
+    expect(store.threads.map((thread) => thread.id)).toEqual(["parent"]);
+  });
+
+  it("本地兜底 upsert 不写入子线程", () => {
+    store.threads = [];
+    upsertThreadSummary({
+      id: "child",
+      name: "子代理",
+      createdAt: 1,
+      recencyAt: 2,
+      parentThreadId: "parent",
+    });
+    expect(store.threads).toEqual([]);
+  });
+
+  it("搜索结果同样过滤子线程", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_rpc") {
+        return Promise.resolve({
+          data: [
+            {
+              thread: {
+                id: "parent",
+                name: "父会话",
+                createdAt: 1,
+                source: "appServer",
+              },
+              snippet: "命中",
+            },
+            {
+              thread: {
+                id: "child",
+                name: "子代理",
+                createdAt: 2,
+                source: "subagent",
+                parentThreadId: "parent",
+              },
+              snippet: "子代理命中",
+            },
+          ],
+          nextCursor: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await searchThreads("命中");
+
+    expect(store.threads.map((thread) => thread.id)).toEqual(["parent"]);
+  });
 });
 
 describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）", () => {

@@ -14,6 +14,7 @@ import { TabKind } from "../../lib/tabs";
 import type {
   PendingInteraction,
   ThreadItem,
+  ThreadRead,
   ThreadSummary,
   Turn,
   UserInput,
@@ -50,6 +51,11 @@ import { readLastSessionId } from "./lastSession";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
 import {
+  isSubagentThread,
+  registerSubagentThread,
+  subagentParentThread,
+} from "./subagentThreads";
+import {
   autoTitleThread,
   isThreadNotFound,
   refreshThreads,
@@ -75,6 +81,18 @@ import {
 export async function openSessionTabForThread(
   threadId: string,
 ): Promise<boolean> {
+  if (isSubagentThread(threadId)) {
+    const childTab = findSessionTabByThread(threadId);
+    if (childTab) dropSessionTab(childTab);
+    setToast("子代理活动仅在主对话中显示");
+    void sessionLog(
+      "info",
+      subagentParentThread(threadId),
+      "subagent-open-blocked",
+      `source=registry child=${threadId} open=session-tab`,
+    );
+    return false;
+  }
   // 仅当目标线程的会话标签是真正的活动标签时短路：文件/终端标签活动时
   // activeSessionTab() 返回的是“最近投影”会话而非显示中的标签，点击历史会话
   // 仍必须走 switchSessionTab 把对应会话标签切回前台。
@@ -86,11 +104,33 @@ export async function openSessionTabForThread(
   ) {
     return true;
   }
-  void sessionLog("info", threadId, "session-open");
   const existing = findSessionTabByThread(threadId);
   if (existing) {
     await switchSessionTab(existing.id);
     return true;
+  }
+  void sessionLog("info", threadId, "session-open");
+  let threadMeta: ThreadRead["thread"];
+  try {
+    const res = await invoke<{ thread: ThreadRead["thread"] }>("thread_read", {
+      threadId,
+      includeTurns: false,
+    });
+    threadMeta = res.thread;
+  } catch (e) {
+    if (isThreadNotFound(e)) setToast("会话已不存在");
+    else setToast(toastError(e));
+    return false;
+  }
+  if (registerSubagentThread(threadMeta) !== null) {
+    setToast("子代理活动仅在主对话中显示");
+    void sessionLog(
+      "info",
+      threadMeta.parentThreadId ?? null,
+      "subagent-open-blocked",
+      `source=thread-read child=${threadId} open=session-tab`,
+    );
+    return false;
   }
   const tab = freshSessionTab();
   tab.threadId = threadId; // 先绑定，加载期间也满足唯一性
@@ -102,7 +142,7 @@ export async function openSessionTabForThread(
   }
   tab.origin = "history";
   await hydrateSessionState(tab);
-  return await loadThreadInto(tab, threadId);
+  return await loadThreadInto(tab, threadId, threadMeta);
 }
 
 /**
@@ -370,6 +410,7 @@ export async function newEmptySession(cwd?: string | null): Promise<boolean> {
 async function loadThreadInto(
   tab: SessionTab,
   threadId: string,
+  threadMeta?: ThreadRead["thread"],
 ): Promise<boolean> {
   const isActive = () => activeSessionTab()?.id === tab.id;
   tab.loading = true;
@@ -379,17 +420,15 @@ async function loadThreadInto(
     // 统一只读元数据：codex CLI 创建的分页线程（historyMode=paginated）不支持
     // includeTurns=true；完整消息一律走 thread/turns/list 分页，legacy 线程在
     // turns/list 不可用时才回退 includeTurns=true 摘要读取
-    const res = await invoke<{
-      thread: {
-        id: string;
-        name?: string | null;
-        preview?: string;
-        cwd?: string | null;
-        historyMode?: string | null;
-        turns?: Turn[];
-      };
-    }>("thread_read", { threadId, includeTurns: false });
-    const historyMode = res.thread.historyMode;
+    const thread =
+      threadMeta ??
+      (
+        await invoke<{ thread: ThreadRead["thread"] }>("thread_read", {
+          threadId,
+          includeTurns: false,
+        })
+      ).thread;
+    const historyMode = thread.historyMode;
     // 大会话优先建立轻量摘要骨架，只加载最新两回合明细；旧版不支持时再全量回退。
     let windowLoaded = await loadThreadHistory(tab, threadId);
     let fullItems: ThreadItem[] | null = windowLoaded
@@ -421,8 +460,8 @@ async function loadThreadInto(
     store.activeWorkByThread[threadId] = (
       store.itemsByThread[threadId] ?? []
     ).filter((x) => isActiveItem(x)).length;
-    const name = res.thread.name ?? "";
-    const cwd = res.thread.cwd ?? null;
+    const name = thread.name ?? "";
+    const cwd = thread.cwd ?? null;
     if (cwd) store.lastWorkspace = cwd;
     // 回合/计划/目标等状态一律写标签（tab 是唯一事实源，不再写 store）
     tab.threadId = threadId;

@@ -14,6 +14,7 @@ import {
   type ModelInfo,
   type PanelTab,
 } from "./types";
+import { isSubagentThread } from "./subagentThreads";
 
 export const store = reactive({
   server: {
@@ -72,5 +73,8 @@ export const backgroundThreadIds = new Set<string>();
 export function isBackgroundThread(
   threadId: string | undefined | null,
 ): boolean {
-  return !!threadId && backgroundThreadIds.has(threadId);
+  return (
+    !!threadId &&
+    (backgroundThreadIds.has(threadId) || isSubagentThread(threadId))
+  );
 }

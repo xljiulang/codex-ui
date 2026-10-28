@@ -1234,6 +1234,274 @@ describe("旧会话 turn 事件不串扰新会话", () => {
     expect(tabs[0].currentTurnId).toBeNull();
   });
 });
+
+describe("子代理线程事件隔离", () => {
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    store.threads = [];
+    tabs.splice(0, tabs.length);
+  });
+
+  afterEach(() => {
+    disposeEvents();
+  });
+
+  it("thread/started 子线程只登记，不刷新历史或打开标签", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      turnActive: true,
+      currentTurnId: "parent-turn",
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    mockedInvoke.mockResolvedValue({ data: [], nextCursor: null });
+    await wireEvents();
+
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "parent",
+        ephemeral: false,
+      },
+    });
+    await flushPromises();
+
+    expect(
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "thread_list"),
+    ).toHaveLength(0);
+    expect(tabs).toEqual([parent]);
+    expect(activeTabId.value).toBe(parent.id);
+    expect(activeSessionTab()?.turnActive).toBe(true);
+  });
+
+  it("子线程回合与消息事件不进入全局状态或改动父回合", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      turnActive: true,
+      currentTurnId: "parent-turn",
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "parent",
+      },
+    });
+    fireListen("turn/started", {
+      threadId: "child",
+      turn: { id: "child-turn" },
+    });
+    fireListen("item/started", {
+      threadId: "child",
+      turnId: "child-turn",
+      item: {
+        id: "child-tool",
+        type: "commandExecution",
+        command: "echo child",
+        status: "inProgress",
+      },
+    });
+    fireListen("item/agentMessage/delta", {
+      threadId: "child",
+      itemId: "child-message",
+      delta: "子代理输出",
+    });
+    fireListen("turn/completed", {
+      threadId: "child",
+      turn: { id: "child-turn", status: "completed" },
+    });
+    await flushPromises();
+
+    expect(store.itemsByThread.child).toBeUndefined();
+    expect(store.activeWorkByThread.child).toBeUndefined();
+    expect(parent.turnActive).toBe(true);
+    expect(parent.currentTurnId).toBe("parent-turn");
+    expect(tabs).toEqual([parent]);
+  });
+
+  it("父会话协作条目声明的子线程立即登记，先于 thread/started 的事件也被隔离", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      turnActive: true,
+      currentTurnId: "parent-turn",
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+
+    fireListen("item/started", {
+      threadId: "parent",
+      turnId: "parent-turn",
+      item: {
+        id: "collab",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        senderThreadId: "parent",
+        receiverThreadIds: ["child"],
+        agentsStates: {},
+      },
+    });
+    fireListen("item/agentMessage/delta", {
+      threadId: "child",
+      itemId: "child-message",
+      delta: "抢先到达的子代理输出",
+    });
+    await flushPromises();
+
+    expect(store.itemsByThread.child).toBeUndefined();
+    expect(store.itemsByThread.parent?.map((item) => item.id)).toContain(
+      "collab",
+    );
+  });
+
+  it("子线程派生的孙线程在协作条目到达时立即登记", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      turnActive: true,
+      currentTurnId: "parent-turn",
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "parent",
+      },
+    });
+    fireListen("item/started", {
+      threadId: "child",
+      turnId: "child-turn",
+      item: {
+        id: "nested-collab",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        status: "inProgress",
+        senderThreadId: "child",
+        receiverThreadIds: ["grandchild"],
+        agentsStates: {},
+      },
+    });
+    fireListen("item/agentMessage/delta", {
+      threadId: "grandchild",
+      itemId: "grandchild-message",
+      delta: "孙代理输出",
+    });
+    await flushPromises();
+
+    expect(store.itemsByThread.child).toBeUndefined();
+    expect(store.itemsByThread.grandchild).toBeUndefined();
+    expect(parent.turnActive).toBe(true);
+  });
+
+  it("子线程交互请求路由到父会话标签", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      turnActive: true,
+      currentTurnId: "parent-turn",
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "parent",
+      },
+    });
+
+    fireListen("interaction:request", {
+      requestId: 42,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "child", turnId: "child-turn" },
+    });
+    await flushPromises();
+
+    expect(parent.interactions.map((item) => item.requestId)).toEqual([42]);
+    expect(store.interactions).toHaveLength(0);
+  });
+
+  it("父会话未打开时子线程交互仍进入全局列表", async () => {
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "closed-parent",
+      },
+    });
+
+    fireListen("interaction:request", {
+      requestId: 43,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "child", turnId: "child-turn" },
+    });
+    await flushPromises();
+
+    expect(store.interactions.map((item) => item.requestId)).toEqual([43]);
+  });
+
+  it("子线程名称、状态和用量不污染历史或父标签", async () => {
+    const parent = makeSessionTab("parent-tab", "parent", {
+      threadTokenUsage: {
+        contextUsed: 10,
+        window: 100,
+      },
+    });
+    tabs.push(parent);
+    activeTabId.value = parent.id;
+    store.threads = [
+      {
+        id: "child",
+        name: "原子代理",
+        createdAt: 1,
+        source: "subagent",
+        parentThreadId: "parent",
+        status: { type: "idle" },
+      },
+    ];
+    mockedInvoke.mockResolvedValue({});
+    await wireEvents();
+    fireListen("thread/started", {
+      thread: {
+        id: "child",
+        source: "subagent",
+        parentThreadId: "parent",
+      },
+    });
+
+    fireListen("thread/name/updated", {
+      threadId: "child",
+      threadName: "子代理新名称",
+    });
+    fireListen("thread/status/changed", {
+      threadId: "child",
+      status: { type: "active" },
+    });
+    fireListen("thread/tokenUsage/updated", {
+      threadId: "child",
+      tokenUsage: { last: { totalTokens: 999 }, modelContextWindow: 1000 },
+    });
+    await flushPromises();
+
+    expect(store.threads[0].name).toBe("原子代理");
+    expect(store.threads[0].status?.type).toBe("idle");
+    expect(parent.threadTokenUsage).toEqual({ contextUsed: 10, window: 100 });
+  });
+});
+
 describe("后台临时线程 delta 事件隔离", () => {
   const LONG_TEXT =
     "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import {
   isThreadItemType,
+  type CollabAgentToolCallItem,
   type DynamicToolCallItem,
   type FileChangeItem,
   type ImageGenerationItem,
@@ -304,6 +305,38 @@ const mcpProgressPercent = computed(() =>
     ? props.item.progressPercent
     : null,
 );
+
+const collabSummary = computed(() => {
+  if (
+    !isThreadItemType<CollabAgentToolCallItem>(
+      props.item,
+      "collabAgentToolCall",
+    )
+  ) {
+    return "";
+  }
+  const states = Object.values(props.item.agentsStates ?? {}).filter(
+    (state): state is { status?: string; message?: string | null } =>
+      !!state && typeof state === "object",
+  );
+  const total = Math.max(
+    new Set(props.item.receiverThreadIds ?? []).size,
+    states.length,
+  );
+  const running = states.filter(
+    (state) => state.status === "running" || state.status === "pendingInit",
+  ).length;
+  const completed = states.filter(
+    (state) => state.status === "completed",
+  ).length;
+  const failed = states.filter((state) => state.status === "errored").length;
+  if (!total) return "";
+  const parts = [`${total} 个子代理`];
+  if (running) parts.push(`运行 ${running}`);
+  if (completed) parts.push(`完成 ${completed}`);
+  if (failed) parts.push(`失败 ${failed}`);
+  return parts.join(" · ");
+});
 </script>
 
 <template>
@@ -332,6 +365,12 @@ const mcpProgressPercent = computed(() =>
         </svg>
         <span class="assistant-card-title">{{ title }}</span>
         <span class="assistant-card-sub">{{ sub }}</span>
+        <span
+          v-if="collabSummary"
+          class="assistant-card-sub tool-agent-summary"
+        >
+          {{ collabSummary }}
+        </span>
         <span class="assistant-card-status">
           <template v-if="statusLabel">
             <span class="status-dot" :class="statusClass"></span>
