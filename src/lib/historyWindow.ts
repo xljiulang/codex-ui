@@ -1,4 +1,9 @@
 import type { ThreadItem, Turn } from "./types";
+import {
+  capTextTail,
+  OUTPUT_TEXT_BYTE_CAP,
+  OUTPUT_TEXT_LINE_CAP,
+} from "./textWindow";
 
 /** 单回合可用的历史明细页（响应可能跨回合，落库前按 turnId 分组）。 */
 export interface HistoryDetailRecord {
@@ -29,7 +34,7 @@ export interface SessionHistoryState {
 }
 
 /** 历史命令输出仍按 UI 现有上限保留末尾 5000 行。 */
-export const HISTORY_OUTPUT_LINE_CAP = 5000;
+export const HISTORY_OUTPUT_LINE_CAP = OUTPUT_TEXT_LINE_CAP;
 
 export function emptyHistoryState(): SessionHistoryState {
   return {
@@ -74,27 +79,21 @@ export function createHistoryTurnStates(
   }));
 }
 
-function tailStart(text: string, maxLines: number): number {
-  let remaining = maxLines;
-  for (let i = text.length - 1; i >= 0; i--) {
-    if (text.charCodeAt(i) !== 10) continue;
-    if (remaining === 1) return i + 1;
-    remaining--;
-  }
-  return 0;
-}
-
-/** 历史命令只保留 UI 能展示的末尾行；未超限时返回原对象。 */
+/** 历史命令只保留 UI 能展示的末尾窗口；未超限时返回原对象。 */
 export function capHistoryCommandOutput(item: ThreadItem): ThreadItem {
   if (item.type !== "commandExecution") return item;
   const output = item.aggregatedOutput;
   if (typeof output !== "string") return item;
-  const start = tailStart(output, HISTORY_OUTPUT_LINE_CAP);
-  if (start === 0) return item;
+  const capped = capTextTail(output, {
+    maxLines: HISTORY_OUTPUT_LINE_CAP,
+    maxBytes: OUTPUT_TEXT_BYTE_CAP,
+  });
+  if (capped.truncation === "none") return item;
   return {
     ...item,
-    aggregatedOutput: output.slice(start),
+    aggregatedOutput: capped.text,
     _historyOutputTruncated: true,
+    _historyOutputTruncation: capped.truncation,
   };
 }
 

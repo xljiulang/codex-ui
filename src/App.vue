@@ -14,8 +14,11 @@ import {
   init,
   openSession,
   restoreLastSession,
+  setToast,
   store,
 } from "./composables/useCodex";
+import { finishStartup } from "./lib/bootRecovery";
+import { takeWebviewRecoveryInfo } from "./lib/webviewRecovery";
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { openSettingsTab } from "./composables/useEditorTabs";
@@ -30,6 +33,7 @@ let unlistenClose: (() => void) | undefined;
 let unlistenNotification: (() => void) | undefined;
 
 onMounted(async () => {
+  const recovery = await takeWebviewRecoveryInfo();
   // 通知「打开会话」：由 Rust 端处理 toast 点击（定时任务终态 / codex 错误）后发事件，
   // 此处聚焦窗口并打开绑定会话
   unlistenNotification = await listen<string>(
@@ -81,9 +85,14 @@ onMounted(async () => {
     await init();
     await setupGlobalDragDrop();
   } finally {
-    // 启动恢复：配置文件记录了最后活跃会话（且线程仍在历史中）则打开该会话并展开
-    // 其目录分组；否则回退打开设置标签（设置 tab 幂等，存在则仅激活）
-    if (!(await restoreLastSession())) openSettingsTab();
+    // renderer 崩溃后的首次重载进入安全模式，不自动重开上次重型会话；
+    // 正常启动仍优先恢复最后活跃会话，不成则打开设置标签。
+    await finishStartup({
+      recovery,
+      restoreLastSession,
+      openSettingsTab,
+      notifyRecovery: setToast,
+    });
   }
 });
 

@@ -157,5 +157,28 @@ describe("历史命令输出截断", () => {
     expect(lines[0]).toBe("L1000");
     expect(lines[lines.length - 1]).toBe("L5999");
     expect(capped._historyOutputTruncated).toBe(true);
+    expect(capped._historyOutputTruncation).toBe("lines");
+  });
+
+  it("超长单行按 512 KiB UTF-8 字节截断并保留合法字符尾部", () => {
+    const source = `prefix-${"中".repeat(200_000)}-suffix`;
+    const item: CommandExecutionItem = {
+      id: "c1",
+      type: "commandExecution",
+      command: "run",
+      status: "completed",
+      aggregatedOutput: source,
+    };
+
+    const capped = capHistoryCommandOutput(item);
+    const output = String(capped.aggregatedOutput);
+
+    expect(new TextEncoder().encode(output).length).toBeLessThanOrEqual(
+      512 * 1024,
+    );
+    expect(output.endsWith("-suffix")).toBe(true);
+    expect(output.includes("\uFFFD")).toBe(false);
+    expect(capped._historyOutputTruncated).toBe(true);
+    expect(capped._historyOutputTruncation).toBe("bytes");
   });
 });

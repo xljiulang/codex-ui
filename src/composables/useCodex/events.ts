@@ -466,7 +466,6 @@ export async function wireEvents() {
         item.streaming = true;
         bumpActive(p.threadId, 1);
       }
-      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );
@@ -489,7 +488,6 @@ export async function wireEvents() {
       if (!isThreadItemType<CommandExecutionItem>(item, "commandExecution"))
         return;
       item.aggregatedOutput = (item.aggregatedOutput ?? "") + p.delta;
-      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );
@@ -524,7 +522,6 @@ export async function wireEvents() {
         content.push(p.delta);
       }
       item.content = content;
-      mirrorOpenHistoryItem(p.threadId, item);
       store.itemsRev++;
     }),
   );

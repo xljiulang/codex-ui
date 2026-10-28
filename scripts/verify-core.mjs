@@ -504,6 +504,78 @@ async function scenarioPin() {
   record("置顶: 取消置顶后徽章消失", unpinned);
 }
 
+// ---------- 场景 3b: 回到底部按钮按压不移位 ----------
+async function scenarioScrollBottomButtonPress() {
+  log("场景 3b: 回到底部按钮按下时水平位置稳定");
+  const setup = await evalJs(`(() => {
+    const scroller = document.querySelector(".chat-scroll");
+    if (!scroller) return null;
+    let filler = document.querySelector("#e2e-scroll-filler");
+    if (!filler) {
+      filler = document.createElement("div");
+      filler.id = "e2e-scroll-filler";
+      filler.style.height = "4000px";
+      scroller.appendChild(filler);
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+    const r = scroller.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  if (!setup) throw new Error("未找到聊天滚动区");
+
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    x: setup.x,
+    y: setup.y,
+    deltaX: 0,
+    deltaY: -120,
+  });
+  await waitFor(
+    "回到底部按钮出现",
+    `!!document.querySelector(".scroll-bottom-btn")`,
+    10000,
+  );
+  const before = await evalJs(`(() => {
+    const r = document.querySelector(".scroll-bottom-btn").getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: before.x,
+    y: before.y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  await sleep(250);
+  const pressed = await evalJs(`(() => {
+    const r = document.querySelector(".scroll-bottom-btn").getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: before.x,
+    y: before.y,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+  });
+
+  record(
+    "回到底部: 鼠标按下前后水平中心不移位",
+    Math.abs(pressed.x - before.x) <= 1,
+    `before=${JSON.stringify(before)} pressed=${JSON.stringify(pressed)}`,
+  );
+  await waitFor(
+    "点击后回到底部且按钮隐藏",
+    `!document.querySelector(".scroll-bottom-btn")`,
+    10000,
+  );
+  await evalJs(`document.querySelector("#e2e-scroll-filler")?.remove()`);
+  await screenshot("3b-scroll-bottom-press.png");
+}
+
 // ---------- 场景 4: 切换会话自动停止旧回合 ----------
 async function scenarioStopOnSwitch() {
   log("场景 4: 切换会话自动停止旧回合");
@@ -592,6 +664,7 @@ async function main() {
   await scenarioPasteImage();
   await scenarioEditorResize();
   await scenarioPin();
+  await scenarioScrollBottomButtonPress();
   await scenarioStopOnSwitch();
   await scenarioHistoryAlwaysVisible();
 

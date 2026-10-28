@@ -12,11 +12,16 @@ import {
   type WebSearchItem,
 } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
-import { useThrottledRef } from "../composables/useThrottledRef";
 import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { copyText } from "../lib/clipboard";
+import {
+  capTextTail,
+  OUTPUT_TEXT_BYTE_CAP,
+  OUTPUT_TEXT_LINE_CAP,
+  type TextTruncation,
+} from "../lib/textWindow";
 import {
   ICON_AGENTS,
   ICON_ARROW_DOWN,
@@ -173,28 +178,50 @@ const sub = computed(() => {
 const output = computed(() =>
   String(props.item.aggregatedOutput ?? props.item.output ?? ""),
 );
-// 渲染输入截断为最后 5000 行，避免超长输出流式期间 O(n^2)；状态里仍保留完整输出
-const OUTPUT_LINE_CAP = 5000;
-const { ref: cappedOutput, truncated: tailOutputTruncated } = useTailWindow(
+// 渲染输入统一限制为末尾 5000 行且不超过 512 KiB，避免超长单行流式期间撑爆 renderer。
+const {
+  ref: cappedOutput,
+  truncation: tailOutputTruncation,
+  flush: flushOutput,
+} = useTailWindow(
   output,
-  OUTPUT_LINE_CAP,
+  {
+    maxLines: OUTPUT_TEXT_LINE_CAP,
+    maxBytes: OUTPUT_TEXT_BYTE_CAP,
+  },
   () => props.item,
 );
-const outputTruncated = computed(
-  () =>
-    tailOutputTruncated.value || props.item._historyOutputTruncated === true,
-);
 const hasOutput = computed(() => cappedOutput.value.trim().length > 0);
-const { ref: shownOutput, flush: flushOutput } = useThrottledRef(
-  cappedOutput,
-  80,
-);
 watch(
   () => props.item.status,
   () => {
     if (!running.value) flushOutput();
   },
 );
+const outputTruncation = computed<TextTruncation>(() => {
+  const historyReason = props.item._historyOutputTruncation;
+  if (
+    historyReason === "lines" ||
+    historyReason === "bytes" ||
+    historyReason === "both"
+  ) {
+    return historyReason;
+  }
+  if (props.item._historyOutputTruncated === true) return "lines";
+  return tailOutputTruncation.value;
+});
+const outputCapMessage = computed(() => {
+  if (outputTruncation.value === "lines") {
+    return `输出过长，仅显示末尾 ${OUTPUT_TEXT_LINE_CAP} 行`;
+  }
+  if (outputTruncation.value === "bytes") {
+    return `输出过长，仅显示末尾不超过 ${OUTPUT_TEXT_BYTE_CAP / 1024} KiB 的内容`;
+  }
+  if (outputTruncation.value === "both") {
+    return `输出过长，仅显示末尾 ${OUTPUT_TEXT_LINE_CAP} 行且不超过 ${OUTPUT_TEXT_BYTE_CAP / 1024} KiB 的内容`;
+  }
+  return "";
+});
 // ---------- 命令输出增量渲染 ----------
 const outputRoot = ref<HTMLElement | null>(null);
 let renderedLen = 0;
@@ -210,7 +237,7 @@ function renderOutput(t: string) {
     committedPrefix = "";
     return;
   }
-  const truncated = outputTruncated.value;
+  const truncated = outputTruncation.value !== "none";
   if (!t.startsWith(committedPrefix) || truncated !== lastTruncated) {
     // 条目替换/文本回退/截断切换：重置并整段重渲染
     renderedLen = 0;
@@ -234,10 +261,10 @@ function renderOutput(t: string) {
   }
 }
 
-watch(shownOutput, (t) => renderOutput(t), { immediate: true });
+watch(cappedOutput, (t) => renderOutput(t), { immediate: true });
 // 输出容器随 v-if 挂载/展开而出现，挂载后补一次渲染
 watch(outputRoot, (el) => {
-  if (el) renderOutput(shownOutput.value);
+  if (el) renderOutput(cappedOutput.value);
 });
 
 const copied = ref(false);
@@ -262,7 +289,7 @@ const argsJson = computed(() => {
   }
 });
 
-const resultText = computed(() => {
+const resultWindow = computed(() => {
   // dynamicToolCall 的结果在 contentItems（{type:"inputText", text} 等），MCP 在 result.content
   const isDynamic = isThreadItemType<DynamicToolCallItem>(
     props.item,
@@ -272,8 +299,10 @@ const resultText = computed(() => {
     ? props.item.contentItems
     : (props.item.result as { content?: unknown[] } | null | undefined)
         ?.content;
-  if (!raw || raw.length === 0) return "";
-  return raw
+  if (!raw || raw.length === 0) {
+    return { text: "", truncation: "none" as const };
+  }
+  const text = raw
     .map((c) => {
       if (c && typeof c === "object" && "text" in c) {
         return String((c as { text: string }).text);
@@ -287,6 +316,24 @@ const resultText = computed(() => {
     })
     .filter((s) => s !== "")
     .join("\n");
+  return capTextTail(text, {
+    maxLines: OUTPUT_TEXT_LINE_CAP,
+    maxBytes: OUTPUT_TEXT_BYTE_CAP,
+  });
+});
+const cappedResultText = computed(() => resultWindow.value.text);
+const resultTruncation = computed(() => resultWindow.value.truncation);
+const resultCapMessage = computed(() => {
+  if (resultTruncation.value === "lines") {
+    return `结果过长，仅显示末尾 ${OUTPUT_TEXT_LINE_CAP} 行`;
+  }
+  if (resultTruncation.value === "bytes") {
+    return `结果过长，仅显示末尾不超过 ${OUTPUT_TEXT_BYTE_CAP / 1024} KiB 的内容`;
+  }
+  if (resultTruncation.value === "both") {
+    return `结果过长，仅显示末尾 ${OUTPUT_TEXT_LINE_CAP} 行且不超过 ${OUTPUT_TEXT_BYTE_CAP / 1024} KiB 的内容`;
+  }
+  return "";
 });
 
 const errorText = computed(() => {
@@ -397,8 +444,8 @@ const collabSummary = computed(() => {
             <span class="tool-command-text">{{ commandText }}</span>
           </div>
           <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
-          <div v-if="outputTruncated" class="tool-output-cap">
-            输出过长，仅显示末尾 {{ OUTPUT_LINE_CAP }} 行
+          <div v-if="outputCapMessage" class="tool-output-cap">
+            {{ outputCapMessage }}
           </div>
           <div
             v-if="hasOutput"
@@ -444,7 +491,12 @@ const collabSummary = computed(() => {
             ></div>
           </div>
           <div v-if="argsJson" class="tool-json">{{ argsJson }}</div>
-          <div v-if="resultText" class="tool-output">{{ resultText }}</div>
+          <div v-if="resultCapMessage" class="tool-result-cap">
+            {{ resultCapMessage }}
+          </div>
+          <div v-if="cappedResultText" class="tool-output">
+            {{ cappedResultText }}
+          </div>
           <div v-if="errorText" class="tool-meta" style="color: var(--red)">
             {{ errorText }}
           </div>
@@ -529,6 +581,12 @@ const collabSummary = computed(() => {
 }
 
 .tool-output-cap {
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+  margin: var(--space-1) 0;
+}
+
+.tool-result-cap {
   font-size: var(--font-sm);
   color: var(--text-faint);
   margin: var(--space-1) 0;

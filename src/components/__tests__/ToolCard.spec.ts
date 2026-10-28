@@ -223,6 +223,67 @@ describe("ToolCard 实时耗时", () => {
     expect(wrapper.find(".tool-output-cap").text()).toContain("5000");
   });
 
+  it("历史按字节截断时提示显示 512 KiB 原因", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "completed",
+          durationMs: 100,
+          aggregatedOutput: "tail-only",
+          _historyOutputTruncated: true,
+          _historyOutputTruncation: "bytes",
+        }),
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+
+    expect(wrapper.find(".tool-output-cap").text()).toContain("512 KiB");
+  });
+
+  it("单行命令输出超过 512 KiB 时只渲染末尾窗口", async () => {
+    const output = "x".repeat(600 * 1024);
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "completed",
+          durationMs: 100,
+          aggregatedOutput: output,
+        }),
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+
+    expect(wrapper.find(".tool-output-cap").text()).toContain("512 KiB");
+    const rendered = wrapper.find(".tool-output").text();
+    expect(rendered.length).toBeLessThanOrEqual(512 * 1024);
+    expect(rendered.endsWith("x")).toBe(true);
+  });
+
+  it("MCP 工具结果文本走同一字节上限并显示提示", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          server: "demo",
+          tool: "large",
+          status: "completed",
+          result: {
+            content: [{ type: "text", text: "中".repeat(200_000) }],
+          },
+        } as ThreadItem,
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+
+    expect(wrapper.find(".tool-result-cap").text()).toContain("512 KiB");
+    const rendered = wrapper.find(".tool-output").text();
+    expect(new TextEncoder().encode(rendered).length).toBeLessThanOrEqual(
+      512 * 1024,
+    );
+    expect(rendered.includes("\uFFFD")).toBe(false);
+  });
+
   it("复制命令按钮写入剪贴板并反馈", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

@@ -52,6 +52,12 @@ pub fn app_exit(app: AppHandle) {
     app.exit(0);
 }
 
+/// 读取并消费 renderer 崩溃后的安全恢复标记（每次重载只返回一次）。
+#[tauri::command]
+pub(crate) fn take_webview_recovery_info() -> Option<crate::webview_recovery::RecoveryInfo> {
+    crate::webview_recovery::take_info()
+}
+
 /// 全局串行化系统“选择文件夹”对话框：任何入口（头部新建会话、输入框目录附件等）
 /// 同一时刻只允许弹出一个，避免多个原生对话框叠加。
 static PICK_DIRECTORY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

@@ -471,9 +471,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   position: absolute;
-  left: 50%;
+  left: calc(50% - 15px);
   bottom: 10px;
-  transform: translateX(-50%);
   z-index: 20;
   width: 30px;
   height: 30px;

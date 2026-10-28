@@ -264,12 +264,14 @@ describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
         aggregatedOutput: "",
       },
     });
+    const historyBeforeDelta = tab.history;
     fireListen("item/commandExecution/outputDelta", {
       threadId: "t1",
       itemId: "c1",
       delta: "hello",
     });
 
+    expect(tab.history).toBe(historyBeforeDelta);
     expect(
       tab.history?.turns[0].detailItems.find((item) => item.id === "c1"),
     ).toMatchObject({ aggregatedOutput: "hello" });

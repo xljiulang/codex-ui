@@ -1,4 +1,5 @@
 pub mod codex;
+pub(crate) mod webview_recovery;
 pub(crate) mod window_glass;
 
 use std::path::PathBuf;
@@ -96,6 +97,9 @@ pub fn run() {
         .on_page_load(|webview, payload| {
             // 主窗口页面加载完成（Vue 已挂载、加载动画已渲染）后再显示，
             // 避免窗体到 WebView 初始化完成之间的默认色闪屏。
+            if webview.label() == "main" && payload.event() == PageLoadEvent::Finished {
+                webview_recovery::mark_page_loaded();
+            }
             if webview.label() == "main"
                 && payload.event() == PageLoadEvent::Finished
                 && !MAIN_WINDOW_SHOWN.swap(true, Ordering::SeqCst)
@@ -145,6 +149,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             codex::commands::test_hook_enabled,
             codex::commands::app_exit,
+            codex::commands::take_webview_recovery_info,
             codex::commands::server_status,
             codex::commands::server_connect,
             codex::commands::server_logs,
@@ -404,6 +409,12 @@ pub fn run() {
                         // 托盘「退出」：先通知前端做安全收尾（停止工作会话/终止运行中终端），
                         // 由前端调用 app_exit 真正退出；WebView 无响应时用兜底超时强制退出。
                         if event.id().0.as_str() == "quit" {
+                            // renderer 已崩溃/进入轻量恢复页时不再等待前端回调，直接放行退出。
+                            if webview_recovery::is_unhealthy() {
+                                ALLOW_EXIT.store(true, Ordering::SeqCst);
+                                app.exit(0);
+                                return;
+                            }
                             let _ = app.emit("app-exit-requested", ());
                             let handle = app.clone();
                             std::thread::spawn(move || {
@@ -452,6 +463,8 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
+            #[cfg(windows)]
+            webview_recovery::install(app.handle());
 
             // 启动时后台导出本机 codex 自带的官方条目（GPT/codex 基线条目随 codex 版本变化，
             // 不再内置在 resources/official-models.json）；失败保留上次缓存并记 warn。
@@ -548,6 +561,11 @@ pub fn run() {
                 if let Some(wechat) =
                     app_handle.try_state::<Arc<codex::wechat_bridge::WeChatBridge>>()
                 {
+                    // renderer 已失联时跳过微信桥的宽限等待，保证托盘退出立即完成；
+                    // server/terminal 的同步收尾已在上方执行。
+                    if webview_recovery::is_unhealthy() {
+                        return;
+                    }
                     // 兜底：桥异常挂起时也保证应用能退出（超时后不再等待微信收尾）。
                     tauri::async_runtime::block_on(async {
                         let _ =

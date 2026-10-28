@@ -1,3 +1,5 @@
+import type { TextTruncation } from "./textWindow";
+
 export interface ServerStatus {
   connected: boolean;
   codexPath?: string | null;
@@ -75,6 +77,9 @@ export interface ThreadItemBase {
   completedAtMs?: number;
   durationMs?: number | null;
   clientId?: string;
+  /** 历史窗口命令输出被截断时的展示元数据。 */
+  _historyOutputTruncated?: boolean;
+  _historyOutputTruncation?: TextTruncation;
   /** 协议未枚举字段保持松散访问（迁移期兼容，按需 as 收窄） */
   [key: string]: unknown;
 }
