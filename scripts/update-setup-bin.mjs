@@ -37,7 +37,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN_DIR = join(ROOT, "setup", "bin");
 
 /** codex 版本：与仓库验证基线（README「协议与版本支持」）保持一致。 */
-const CODEX_VERSION = "0.156.1";
+const CODEX_VERSION = "0.165.0";
 /** ripgrep 版本：与 codex 包内 `codex-path/rg.exe` 同版本。 */
 const RIPGREP_VERSION = "15.2.0";
 
@@ -54,26 +54,26 @@ const FILES = [
   {
     name: "codex.exe",
     codexAsset: "codex-x86_64-pc-windows-msvc.exe",
-    sha256: "70bcb05f9bf1a4e7306edd0cd1b57d02af3267ad02a34b26f45c8c4bb20a3301",
-    bytes: 323383088,
+    sha256: "d4b2e6a054ea1dfe53217f9d8942c5f8a9f4b76171a1e0bb76ced5759915300a",
+    bytes: 357356336,
   },
   {
     name: "codex-code-mode-host.exe",
     codexAsset: "codex-code-mode-host-x86_64-pc-windows-msvc.exe",
-    sha256: "0f83a73dc6d511d43bd3e52cc0a999cb383c19c645ef3fbd8fbdaddde3088138",
-    bytes: 72466736,
+    sha256: "c15b0ec7c44be4bef2516c251cc8b9f3f4ab9f8727cf2d567d1f183fd415ef2d",
+    bytes: 78139696,
   },
   {
     name: "codex-command-runner.exe",
     codexAsset: "codex-command-runner-x86_64-pc-windows-msvc.exe",
-    sha256: "67fde4e4983c031675773f632991f14794328a8cccf2bc542137bd2658370822",
-    bytes: 8222000,
+    sha256: "8f1a9d4217a34d6b44df81c25999ff9b98bb8d0e3c179aa070fcd84b3ce7a9d3",
+    bytes: 8748848,
   },
   {
     name: "codex-windows-sandbox-setup.exe",
     codexAsset: "codex-windows-sandbox-setup-x86_64-pc-windows-msvc.exe",
-    sha256: "2bb0e7bd8ae23757c5273c4e82b506eb2923ed5c75facaef230934a1e0aab87b",
-    bytes: 15472944,
+    sha256: "a39f42dc697919e650cd24f82daaecd6121e41e3f4d56373fef4f4177f8eee02",
+    bytes: 18794288,
   },
   // rg 从 zip 里取：官方 zip 内的 rg.exe 即目标文件
   {

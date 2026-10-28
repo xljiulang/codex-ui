@@ -24,7 +24,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RESOURCES = join(ROOT, "src-tauri", "resources");
 
 /** codex 基线版本：与 src-tauri 里适配的 codex-cli 版本保持一致。 */
-const CODEX_BASELINE_TAG = "rust-v0.149.0";
+const CODEX_BASELINE_TAG = "rust-v0.165.0";
 const CODEX_MODELS_URL = `https://raw.githubusercontent.com/openai/codex/${CODEX_BASELINE_TAG}/codex-rs/models-manager/models.json`;
 const MODELS_DEV_URL = "https://models.dev/catalog.json";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/models";

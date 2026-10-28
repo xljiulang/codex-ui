@@ -558,7 +558,7 @@ codex-ui.exe（Tauri 2 窗口）
 - 安装版自带 VC++ 运行库（`vcruntime140.dll` / `vcruntime140_1.dll` 随包内置，见「构建」），**无需预装**；只有不走安装包、直接运行散装 `codex-ui.exe` 时，才需要系统已安装「Microsoft Visual C++ 2015-2022 运行库」
 - Rust stable-msvc（rustup）+ VS C++ 构建工具
 - Node.js 18+（仅开发/构建需要；运行端不需要）
-- `codex` CLI（可在设置页指定路径；验证基线 codex-cli 0.156.1（兼容 0.149.0+））
+- `codex` CLI（可在设置页指定路径；验证基线 codex-cli 0.165.0（兼容 0.149.0+））
 - 全部 Git 功能需要系统已安装 **Git**（启动时探测 `git --version` 并缓存；未安装时功能禁用/报错并提示安装）
 
 ## 开发
@@ -632,7 +632,7 @@ npm run setup-bin            # 按脚本顶部版本号下载 → 校验 sha256 
 npm run setup-bin -- --check # 只校验现值（不联网），打包前自检用
 ```
 
-脚本（`scripts/update-setup-bin.mjs`）内置目标版本的下载地址与哈希（当前 codex 0.156.1 + ripgrep 15.2.0），任一文件校验不符即整体中止、不改动 `setup\bin`。更新后需重跑 `build-installer.bat`（或 `build-release.bat`）才会把新二进制打进安装包。脚本只手动执行，不接入构建流程——离线打包不受影响。
+脚本（`scripts/update-setup-bin.mjs`）内置目标版本的下载地址与哈希（当前 codex 0.165.0 + ripgrep 15.2.0），任一文件校验不符即整体中止、不改动 `setup\bin`。更新后需重跑 `build-installer.bat`（或 `build-release.bat`）才会把新二进制打进安装包。脚本只手动执行，不接入构建流程——离线打包不受影响。
 
 下载走 `scripts/lib/http.mjs` 的代理感知链路（与 `update-model-catalog-sources.mjs` 共用）：设置 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（大小写皆可）时按目标协议经 CONNECT 隧道下载，命中 `NO_PROXY` 则直连；未设置时与直连行为一致。不读 Windows 注册表里的系统代理设置，需要走代理请设上述环境变量。每条下载日志都会标出实际路由（`直连` / `经代理 <地址>`），便于确认是否走对。
 
@@ -727,7 +727,7 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
   回复为最终 agent 文本，超长自动分段（约 1800 字/条）。
 - **回复保留 Markdown 原文**：Codex 回复按原始 Markdown 直接发送（协议由 Rust 内置实现，不做任何剥离），由微信端/ClawBot 侧负责渲染；忙碌/失败等系统提示仍为纯文本。
 - **出站发文件（动态工具 `codexui_send_file_to_wechat`）**：让 Codex 把本地文件发回来（例如「把 `D:\x\报告.pdf` 发给我」）时，模型调用该工具（参数 `paths` 为文件绝对路径数组，单次最多 5 个），应用完成加密上传后发一条媒体消息（图片/视频按扩展名走对应类型，其余按文件），并把**真实结果**（哪些发出、哪些失败及原因）回给模型，由模型据实回复用户。单个文件明文上限 200 MB；路径不存在/是目录/超限、会话未绑定微信或工具被禁用时返回失败文案。工具在**绑定微信的会话的任何回合**都可用（含桌面回合），由后端 Rust 直接应答执行，不依赖窗口是否存活。
-  **生效范围仅限新建会话**：`dynamicTools` 只能在 `thread/start` 注册（0.156.1 依然如此，`thread/resume`/`fork`/`turn/start`/`thread/settings/update` 都没有该字段），因此只有本次改动**之后新建**的会话带这个工具；老会话与分叉线程在微信里要发文件，需新建会话并重新扫码绑定。旧的 `<wechat_send_file>` 标签方案已删除。
+  **生效范围仅限新建会话**：`dynamicTools` 只能在 `thread/start` 注册（0.165.0 依然如此，`thread/resume`/`fork`/`turn/start`/`thread/settings/update` 都没有该字段），因此只有本次改动**之后新建**的会话带这个工具；老会话与分叉线程在微信里要发文件，需新建会话并重新扫码绑定。旧的 `<wechat_send_file>` 标签方案已删除。
   **微信回合不再注入自研开发者指令**：`collaborationMode.settings.developer_instructions` 传 `null`（与桌面端、定时任务一致），「当前是 Default 模式 / 历史 Plan 块失效」由 codex 内置块负责；发文件规则全部来自上面的工具描述，因此老会话既没有工具、也不会有「请新建会话重新绑定」之类的兜底提示（模型只会如实回「发不了」）。
   **接收端可正常下载并打开（2026-09-24 真机验证）**。两个必须遵守的协议细节：① 媒体项的 `aes_key` 必须是 **base64(32 字符 hex 串)**（44 字符）——填 base64(16 字节密钥原文)（24 字符）会让接收端停在「下载中 0%」，或偶发下完却仍是密文，这是此前该功能不可用的真正原因；② 上传地址优先用 `getuploadurl` 返回的 `upload_full_url`（平台上报较新 `channel_version` 时会返回，内含 `taskid`，必须原样使用），没有该字段时才回退「`upload_param` + `filekey` 自拼」。
 - **回复兜底**：若回合正常结束却没捕获到助手文本（通知订阅偶发丢消息），会自动回查该回合的最终 `agentMessage` 文本作为回复；完成信号按「线程 + 回合 id」精确匹配，避免同线程残留的旧完成信号（后台压缩/重连遗留）误判新回合导致误报无输出；确无文本才返回中性提示（不再误报「执行失败：回合异常结束」）。
@@ -751,13 +751,13 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
 
 ### 版本兼容与协议核对
 
-当前版本**验证基线 codex-cli 0.156.1**（兼容 0.149.0+）。应用启动时会探测 `codex --version`：
+当前版本**验证基线 codex-cli 0.165.0**（兼容 0.149.0+）。应用启动时会探测 `codex --version`：
 版本**低于 0.149.0** 时在状态栏提示“未适配”、但照常运行；0.149.0 及更高版本不提示。
 高版本不警告意味着未来 codex 协议变化时应用可能静默异常，升级 codex 后请留意功能是否正常。
-协议差异核对见 [docs/app-server.md](docs/app-server.md)：§1.1 为 0.149.0 → 0.154.0，§1.2 为 0.154.0 → 0.156.1
-（`ServerRequest` 两次复核均无变化；0.156.0 起移除 `thread/rollback`，本项目未调用，其余新增面不使用即不受影响）。
+协议差异核对见 [docs/app-server.md](docs/app-server.md)：§1.1 为 0.149.0 → 0.154.0，§1.2 为 0.154.0 → 0.156.1，§1.3 为 0.156.1 → 0.165.0
+（0.165.0 复核无方法移除；0.156.0 起移除的 `thread/rollback` 本项目未调用，其余新增面不使用即不受影响）。
 0.156.1 已实际采用的两项新增能力：打开历史会话时用 `thread/resume` 返回的 `collaborationMode` 回填协作模式（0.154 及更早没有该字段，缺失时保持本地值），设置页「基础设置」用 `memory/status` 显示记忆 v2 就绪度（老版本 codex 报错时整行隐藏）。
-**已知不一致（0.149–0.154）**：这些版本的 base instructions 仍教模型使用 `update_plan`，但请求的 `tools` 里已无该工具，模型调用会被 codex 拒为 `unsupported call: update_plan`（表现为模型说「工具 update_plan 不可用」，默认/计划模式皆然）。0.155/0.156 的内置指令已不再包含 `update_plan`，属 codex 侧自行消失的历史问题；详见「兼容代理」小节的同名条目与 `docs/变更记录.md`。
+**已知不一致（0.149–0.154）**：这些版本的 base instructions 仍教模型使用 `update_plan`，但请求的 `tools` 里已无该工具，模型调用会被 codex 拒为 `unsupported call: update_plan`（表现为模型说「工具 update_plan 不可用」，默认/计划模式皆然）。0.155 及以后版本的内置指令已不再包含 `update_plan`，属 codex 侧自行消失的历史问题；详见「兼容代理」小节的同名条目与 `docs/变更记录.md`。
 
 以 `codex app-server generate-ts --experimental` 输出的协议绑定为参考。后端只实现本项目所需字段，未知通知忽略并记录日志。codex CLI 升级后如协议变化，可重新生成绑定核对：
 

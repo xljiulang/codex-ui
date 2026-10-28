@@ -3,6 +3,7 @@
 > 本文档的协议盘点基于本机 `codex.exe`（**codex-cli 0.149.0**，2026-08-23）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md` 的协议说明。
 > 2026-09-15 已用本机 **codex-cli 0.154.0** 重新生成上述绑定复核，差异与结论见 §1.1：客户端请求/通知为纯增量，`ServerRequest` 集合与既有字段无破坏性变更；下文各表仍按 0.149.0 基线盘点，其中的数量统计同理。
 > 2026-09-25 已用本机 **codex-cli 0.156.1** 再次生成绑定复核，差异与结论见 §1.2：**首次出现方法移除**（`thread/rollback`），但本项目未调用；下文各表仍按 0.149.0 基线盘点，只有被 0.156 影响的两处（`thread/rollback`、`Thread.turns`）就地标注。
+> 2026-10-28 已用本机 **codex-cli 0.165.0** 再次生成绑定复核，差异与结论见 §1.3：方法集合纯增量且无移除，既有协议调用保持兼容。
 > 协议为实验性（`[experimental]`），随 codex 版本演进；生成产物与运行版本一一对应，升级 codex 后应重新生成并核对。
 
 ---
@@ -56,7 +57,29 @@
 | `thread/resume` 响应新增 `collaborationMode` | `CollaborationMode | null`，注释写明「older server 可能省略」。打开历史会话时以它为准回填协作模式，替代仅靠请求体反推（见 README）。**0.154.0 及更早的 resume 没有该字段**，缺失时必须保持本地值不动 |
 | `memory/status` | 入参 `minConsolidatedThreads`（默认 20，范围 1..=4096），返回 `{ v2ConsolidatedThreads, v2Ready }`。0.154.0 会报 `-32600 unknown variant`，需静默降级；实验方法，未声明 `capabilities.experimentalApi` 时报 `requires experimentalApi capability` |
 
-### 1.3 0.156 新增但本项目未接的协议面
+### 1.3 版本差异（0.156.1 → 0.165.0）
+
+用本机 codex-cli 0.165.0 重新生成绑定，与 0.156.1 的产物逐文件比对
+（`generate-ts --experimental`：867 → 906 个文件；`generate-json-schema --experimental`：436 → 460 个文件）：
+
+| 面 | 0.156.1 | 0.165.0 | 结论 |
+|---|---|---|---|
+| `ServerRequest`（服务端反向请求） | 11 | 11 | 集合不变，现有应答逻辑无需调整 |
+| `ClientRequest`（客户端请求） | 167 | 179 | 新增 `account/bedrock/checkGovCloudRequirements`、`account/gatewayOAuth/{cancel,login,read}`、`feedback/save`、`thread/attachmentOwner/list`、`thread/items/read`、`thread/memory/read`、`thread/prediction/{request,cancel}`、`thread/readState/update`、`thread/sample{,/cancel}`；无移除 |
+| `ServerNotification` | 84 | 87 | 新增 `account/gatewayOAuth/changed`、`thread/prediction/updated`、`thread/readState/changed`；无移除 |
+
+本项目实际调用的方法全部保留。与现有功能相关的字段变化均可按版本缺失降级：
+
+| 协议面 | 变化与兼容处理 |
+|---|---|
+| `ThreadItemsListParams.cursor` | 类型由 `string` 扩为 `ThreadItemsListCursor = string \| { type: "item", itemId }`。本项目只发送服务端返回的 opaque string cursor，保持原样即可 |
+| `Turn.rootTurnId`、`TurnStartParams.{parentTurnId,rootTurnId}` | 增加回合链追踪字段；普通用户回合不设置父子回合时无需传，旧版服务端会忽略 |
+| `ThreadItem.subAgentActivity` | 新增可空的 `model` / `reasoningEffort`；现有子代理活动 UI 继续按旧字段渲染 |
+| `McpServerStatus` / `ListMcpServerStatusParams` | 状态新增 `httpOrigin`、`toolListMeta`，查询新增可选 `serverName`；现有 MCP 详情继续取本项目的工具/资源子集 |
+| `ConfigRequirementsReadResponse` | 新增 `supportsIndependentSpeedModes`；老服务端缺省时保持现有速度档位处理 |
+| `MessagePhase` / `ImageGenerationItem` | 新增 `partial_answer`；图片结果可由 `result` 或 `fileId` 表示。前端现有字段类型宽松，未知展示形状回退原始 JSON，不影响协议解码 |
+
+### 1.4 0.156 新增但本项目未接的协议面
 
 以下能力在 0.156.1 已存在，本项目暂不使用（不需要即无影响），登记备查：
 
@@ -915,5 +938,5 @@ codex app-server generate-json-schema --experimental --out <DIR>
 ## 参考
 
 - 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（0.154.0 起另有 `codex-rs/app-server-client/README.md` 描述进程内客户端；仓库 tag 与 CLI 版本不完全对齐，勿直接按 tag 推算方法集合）
-- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（本文件盘点为 codex-cli 0.149.0；2026-09-15 已用 0.154.0 复核见 §1.1，2026-09-25 已用 0.156.1 复核见 §1.2）
+- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（本文件盘点为 codex-cli 0.149.0；2026-09-15 已用 0.154.0 复核见 §1.1，2026-09-25 已用 0.156.1 复核见 §1.2，2026-10-28 已用 0.165.0 复核见 §1.3）
 - 本地实测：`src-tauri/tests/app_server_integration.rs`、`docs/协议盘点.md`
