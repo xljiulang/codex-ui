@@ -28,8 +28,8 @@ import { activeTabId } from "../useTabs";
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
 
-function fileContent(content: string, validUtf8 = true) {
-  return { content, validUtf8, byteSize: content.length };
+function fileContent(content: string, encoding = "utf-8") {
+  return { content, encoding, byteSize: content.length };
 }
 
 function binaryContent(bytes: string) {
@@ -98,6 +98,36 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(tab.editorState!.doc.toString()).toBe("hello");
     expect(tab.status).toBe("");
+  });
+
+  it("外部刷新后采用新的文件编码", async () => {
+    const tab = await openFile("Program.cs", "old");
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("// 更新后", "gbk"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await refreshTabsFromFs({ root, paths: ["Program.cs"] });
+
+    expect(tab.editorState!.doc.toString()).toBe("// 更新后");
+    expect(tab.encoding).toBe("gbk");
+    expect(tab.readOnly).toBe(false);
+  });
+
+  it("内容相同但编码变化时仍更新标签编码", async () => {
+    const tab = await openFile("Program.cs", "same text");
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("same text", "gbk"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await refreshTabsFromFs({ root, paths: ["Program.cs"] });
+
+    expect(tab.encoding).toBe("gbk");
   });
 
   it("脏标签跳过：不读盘并提示外部已变更", async () => {

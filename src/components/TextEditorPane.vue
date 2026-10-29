@@ -13,6 +13,7 @@ import { redo, selectAll, undo } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import { formatFileSize } from "../lib/sessionFs";
 import { languageFromPath } from "../lib/highlight";
+import { textEncodingLabel } from "../lib/editorFile";
 import { relPathOf } from "../lib/format";
 import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
 import {
@@ -57,6 +58,7 @@ const previewMode = computed({
 });
 
 const langLabel = computed(() => languageFromPath(props.tab.path) ?? "text");
+const encodingLabel = computed(() => textEncodingLabel(props.tab.encoding));
 const byteSizeLabel = computed(() =>
   props.tab.byteSize == null ? "" : formatFileSize(props.tab.byteSize),
 );
@@ -387,7 +389,7 @@ onBeforeUnmount(() => {
     </div>
     <div v-else class="text-editor-body">
       <div v-if="tab.readOnly" class="text-editor-banner">
-        该文件不是 UTF-8 编码，已以只读方式打开（保存功能已禁用）。
+        该文件编码无法识别，已以只读方式打开（保存功能已禁用）。
       </div>
       <div
         v-show="!previewMode"
@@ -405,7 +407,7 @@ onBeforeUnmount(() => {
       <span>{{
         tab.languageDisabled ? "纯文本（超长行，已停用语法高亮）" : langLabel
       }}</span>
-      <span>UTF-8{{ tab.readOnly ? "（只读）" : "" }}</span>
+      <span>{{ encodingLabel }}{{ tab.readOnly ? "（只读）" : "" }}</span>
       <span v-if="byteSizeLabel">{{ byteSizeLabel }}</span>
       <span>{{ tab.eol === "\r\n" ? "CRLF" : "LF" }}</span>
       <span class="text-editor-status-save">{{ tab.status }}</span>

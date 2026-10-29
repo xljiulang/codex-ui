@@ -1,5 +1,5 @@
 import type { Compartment, EditorState, Text } from "@codemirror/state";
-import type { EditorEol } from "../../lib/editorFile";
+import type { EditorEol, TextFileEncoding } from "../../lib/editorFile";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
@@ -27,6 +27,7 @@ export interface FileEditorTab extends EditorTabBase {
   wrap: boolean;
   /** Markdown 预览/编辑切换态：随标签持久化，切换标签后保持切出时状态 */
   markdownPreview: boolean;
+  encoding: TextFileEncoding;
   eol: EditorEol;
   hadBom: boolean;
   byteSize: number | null;

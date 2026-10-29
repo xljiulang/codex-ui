@@ -116,10 +116,10 @@ const bTxt = root + "\\b.txt";
 const aMd = root + "\\a.md";
 const bMd = root + "\\b.md";
 
-function fileContent(content: string, validUtf8 = true) {
+function fileContent(content: string, encoding = "utf-8") {
   return {
     content,
-    validUtf8,
+    encoding,
     byteSize: content.length,
   };
 }
@@ -1570,16 +1570,17 @@ describe("EditorPane 左侧多标签编辑区", () => {
       workspace: root,
       path: "a.txt",
       content: "\uFEFFxa\r\nb\r\n",
+      encoding: "utf-8",
     });
     expect(wrapper.find(".editor-tab-dirty").exists()).toBe(false);
     expect(wrapper.find(".text-editor-status-save").text()).toContain("已保存");
     wrapper.unmount();
   });
 
-  it("非 UTF-8 文件：只读横幅提示且保存按钮禁用", async () => {
+  it("未知编码文件：只读横幅提示且保存按钮禁用", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
-        return Promise.resolve(fileContent("abc", false));
+        return Promise.resolve(fileContent("abc", "unknown"));
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -1725,6 +1726,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       workspace: root,
       path: "a.txt",
       content: "xhello",
+      encoding: "utf-8",
     });
     expect(tabs.some((t) => t.id === aTab.id)).toBe(false);
     expect(activeTabId.value).toBe("sess-1");

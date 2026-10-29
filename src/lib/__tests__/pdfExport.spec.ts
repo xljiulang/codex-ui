@@ -38,6 +38,7 @@ function fakeTab(content: string): FileEditorTab {
     saving: false,
     wrap: false,
     markdownPreview: false,
+    encoding: "utf-8",
     eol: "\n",
     hadBom: false,
     byteSize: content.length,

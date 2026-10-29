@@ -1,8 +1,51 @@
 /** 编辑器文件格式处理：行尾（EOL）与 BOM 的检测/还原 */
 
 export type EditorEol = "\n" | "\r\n";
+export type TextFileEncoding =
+  | "utf-8"
+  | "utf-16le"
+  | "utf-16be"
+  | "gbk"
+  | "gb18030"
+  | "big5"
+  | "shift_jis"
+  | "euc-kr"
+  | "windows-1252"
+  | "unknown";
+
+export interface TextFileContent {
+  content: string;
+  encoding: TextFileEncoding;
+  byteSize: number;
+}
 
 export const UTF8_BOM = "\uFEFF";
+
+/** 编辑器状态栏编码标签；unknown 仅用于只读降级展示 */
+export function textEncodingLabel(encoding: TextFileEncoding): string {
+  switch (encoding) {
+    case "utf-8":
+      return "UTF-8";
+    case "utf-16le":
+      return "UTF-16 LE";
+    case "utf-16be":
+      return "UTF-16 BE";
+    case "gbk":
+      return "GBK";
+    case "gb18030":
+      return "GB18030";
+    case "big5":
+      return "Big5";
+    case "shift_jis":
+      return "Shift_JIS";
+    case "euc-kr":
+      return "EUC-KR";
+    case "windows-1252":
+      return "Windows-1252";
+    case "unknown":
+      return "未知编码";
+  }
+}
 
 /**
  * 检测主导行尾：CRLF 数量 ≥ 独立 LF 且存在 CRLF 时按 CRLF，

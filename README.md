@@ -152,7 +152,9 @@
 #### 按类型打开
 
 - 文件单击或右键「打开」**按类型分发**（已打开的文件右键菜单不显示「打开」，单击仍激活对应标签）：
-  文本文件在左侧标签页以文本编辑器打开（语法高亮、可编辑），
+  文本文件在左侧标签页以文本编辑器打开（语法高亮、可编辑；自动识别 UTF-8、
+  带 BOM 的 UTF-16、GBK/GB18030、Big5、Shift_JIS、EUC-KR 与 Windows-1252，
+  保存时保留原编码），
   `.pdf` 与图像文件（png/jpg/jpeg/gif/webp/bmp/svg/ico/avif）打开只读预览标签
   （PDF 用 pdf.js 渲染、支持翻页缩放；图像经 asset 协议直显），
   视频/音频文件（mp4/webm/mkv/mov/avi/m4v/ogv、mp3/wav/ogg/flac/m4a/aac/opus 等）打开播放标签

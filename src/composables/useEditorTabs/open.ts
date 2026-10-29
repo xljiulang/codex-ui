@@ -6,6 +6,7 @@ import {
   detectEol,
   normalizeForEditor,
   stripBom,
+  type TextFileContent,
 } from "../../lib/editorFile";
 import { formatTimeHMS, pathBaseName } from "../../lib/format";
 import { languageFromPath } from "../../lib/highlight";
@@ -31,13 +32,6 @@ import type {
   SettingsTab,
   TerminalEditorTab,
 } from "./types";
-
-/** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
-interface TextFileContent {
-  content: string;
-  validUtf8: boolean;
-  byteSize: number;
-}
 
 function fileTabId(workspace: string, path: string): string {
   return "file:" + JSON.stringify([workspace, path]);
@@ -107,7 +101,7 @@ export function openSettingsTab(): void {
 export async function buildFileEditorState(
   tab: FileEditorTab,
   doc: string,
-  validUtf8: boolean,
+  readOnly: boolean,
   selection?: { line: number; col: number },
 ): Promise<EditorState> {
   const [
@@ -128,7 +122,7 @@ export async function buildFileEditorState(
     doc,
     buildEditorExtensions({
       language: languageDisabled ? null : language,
-      readOnly: !validUtf8,
+      readOnly,
       wrap: tab.wrap,
       wrapCompartment,
       savedText: () => tab.savedText,
@@ -329,6 +323,7 @@ export async function openFileTab(
     wrap: false,
     // Markdown 文件默认渲染模式（与 TextEditorPane.isMarkdown 同一判断，覆盖 .md/.markdown）
     markdownPreview: languageFromPath(path) === "markdown",
+    encoding: "utf-8",
     eol: "\n",
     hadBom: false,
     byteSize: null,
@@ -348,19 +343,20 @@ export async function openFileTab(
       workspace,
       path,
     });
-    const ro = !info.validUtf8;
+    const ro = info.encoding === "unknown";
     const { text, hadBom } = stripBom(info.content);
     const lineEol = detectEol(text);
     const doc = normalizeForEditor(text, lineEol);
-    const state = await buildFileEditorState(tab, doc, info.validUtf8);
+    const state = await buildFileEditorState(tab, doc, ro);
     tab.readOnly = ro;
+    tab.encoding = info.encoding;
     tab.eol = lineEol;
     tab.hadBom = hadBom;
     tab.byteSize = info.byteSize;
     tab.editorState = markRaw(state);
     tab.savedText = markRaw(state.doc);
     if (ro) {
-      tab.status = "文件不是 UTF-8 编码，已以只读方式打开";
+      tab.status = "文件编码无法识别，已以只读方式打开";
     }
   } catch (e) {
     tab.error = String(e);
@@ -388,6 +384,7 @@ export async function saveFileTab(id: string): Promise<boolean> {
       workspace: tab.workspace,
       path: tab.path,
       content,
+      encoding: tab.encoding,
     });
     tab.savedText = markRaw(tab.editorState.doc);
     tab.dirty = false;

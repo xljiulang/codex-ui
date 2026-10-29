@@ -33,14 +33,18 @@ const root = "D:\\repo";
 const WAIT_TIMEOUT = 15_000;
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
-function fileContent(content: string) {
-  return { content, validUtf8: true, byteSize: content.length };
+function fileContent(content: string, encoding = "utf-8") {
+  return { content, encoding, byteSize: content.length };
 }
 
-async function openTab(path: string, content: string): Promise<FileEditorTab> {
+async function openTab(
+  path: string,
+  content: string,
+  encoding = "utf-8",
+): Promise<FileEditorTab> {
   mockedInvoke.mockImplementation((cmd) => {
     if (cmd === "session_fs_read") {
-      return Promise.resolve(fileContent(content));
+      return Promise.resolve(fileContent(content, encoding));
     }
     if (cmd === "clipboard_read_text") {
       return Promise.resolve("pasted-text");
@@ -557,8 +561,18 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
       workspace: root,
       path: "a.md",
       content: "# # hi",
+      encoding: "utf-8",
     });
     expect(tab.dirty).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("GBK 文件状态栏显示实际编码且不显示只读提示", async () => {
+    const tab = await openTab("Program.cs", "// 中文注释", "gbk");
+    const wrapper = await mountEditor(tab);
+
+    expect(wrapper.find(".text-editor-banner").exists()).toBe(false);
+    expect(wrapper.find(".text-editor-status").text()).toContain("GBK");
     wrapper.unmount();
   });
 });

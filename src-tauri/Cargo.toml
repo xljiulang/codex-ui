@@ -54,6 +54,8 @@ image = { version = "0.25", default-features = false, features = [
     "bmp",
 ] }
 base64 = "0.22"
+chardetng = "1"
+encoding_rs = "0.8"
 aes = "0.8"
 ecb = "0.1"
 md-5 = "0.10"

@@ -64,10 +64,10 @@ const mockedAttachTerminal = vi.mocked(attachTerminal);
 const mockedReleaseTerminal = vi.mocked(releaseTerminal);
 const root = "D:\\repo";
 
-function fileContent(content: string, validUtf8 = true) {
+function fileContent(content: string, encoding = "utf-8") {
   return {
     content,
-    validUtf8,
+    encoding,
     byteSize: content.length,
   };
 }
@@ -173,6 +173,7 @@ describe("useEditorTabs 标签状态", () => {
       workspace: root,
       path: "a.txt",
       content: "\uFEFFxa\r\nb\r\n",
+      encoding: "utf-8",
     });
     expect(tab.dirty).toBe(false);
     expect(tab.status).toContain("已保存");
@@ -183,7 +184,7 @@ describe("useEditorTabs 标签状态", () => {
   it("非 UTF-8 文件以只读方式打开", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
-        return Promise.resolve(fileContent("abc", false));
+        return Promise.resolve(fileContent("abc", "unknown"));
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -192,6 +193,38 @@ describe("useEditorTabs 标签状态", () => {
     const tab = fileTab(activeTabId.value);
     expect(tab.readOnly).toBe(true);
     expect(await saveFileTab(tab.id)).toBe(false);
+  });
+
+  it("GBK 文件可编辑并按原编码保存", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({
+          content: "// 中文注释",
+          encoding: "gbk",
+          byteSize: 12,
+        });
+      }
+      if (cmd === "session_fs_write") {
+        return Promise.resolve({});
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "Program.cs");
+    const tab = fileTab(activeTabId.value);
+    expect(tab.readOnly).toBe(false);
+
+    const { view, host } = mountView(tab);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(await saveFileTab(tab.id)).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", {
+      workspace: root,
+      path: "Program.cs",
+      content: "x// 中文注释",
+      encoding: "gbk",
+    });
+    view.destroy();
+    host.remove();
   });
 
   it("读取失败：标签保留并记录错误", async () => {

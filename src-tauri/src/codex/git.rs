@@ -1818,10 +1818,11 @@ fn git_commit_file_diff(root: &str, hash: &str, path: &str) -> Result<Vec<DiffRo
 /// 内容文本判定采样字节数（与 session_fs 文本探测窗口一致）
 const TEXT_PROBE_BYTES: usize = 8000;
 
-/// 应用文本判定：前 8000 字节无 NUL 且合法 UTF-8（采样边界截断容忍）→ 文本。
+/// 应用文本判定：前 8000 字节按共享编码探测规则判定文本。
 /// 与资源面板 session_fs_probe_text 共用同一规则，保证两处对同一文件判定一致。
 fn content_is_text(data: &[u8]) -> bool {
-    looks_text(&data[..data.len().min(TEXT_PROBE_BYTES)])
+    let end = data.len().min(TEXT_PROBE_BYTES);
+    looks_text(&data[..end], data.len() > end)
 }
 
 /// 读取仓库内 blob 原始字节（`git cat-file blob <rev>:<path>`）；不存在返回 None
@@ -1843,6 +1844,7 @@ fn blob_bytes(git_bin: &Path, root: &str, rev: &str, path: &str) -> Option<Vec<u
 fn worktree_file_is_text(root: &Path, path: &str) -> Option<bool> {
     let mut buf = vec![0u8; TEXT_PROBE_BYTES];
     let mut file = std::fs::File::open(root.join(path)).ok()?;
+    let file_len = file.metadata().ok()?.len();
     let mut n = 0;
     while n < buf.len() {
         match file.read(&mut buf[n..]) {
@@ -1851,7 +1853,7 @@ fn worktree_file_is_text(root: &Path, path: &str) -> Option<bool> {
             Err(_) => return None,
         }
     }
-    Some(content_is_text(&buf[..n]))
+    Some(looks_text(&buf[..n], file_len > TEXT_PROBE_BYTES as u64))
 }
 
 /// diff 基准统一为 HEAD（暂存 + 未暂存合并）；未跟踪文件与空内容对比。

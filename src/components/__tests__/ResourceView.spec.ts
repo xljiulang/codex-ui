@@ -104,6 +104,16 @@ const mainTs: FsEntry = {
   createdAtMs: 0,
   childCount: null,
 };
+const programCs: FsEntry = {
+  name: "Program.cs",
+  path: rootPath + "\\src\\Program.cs",
+  relPath: "src/Program.cs",
+  isDir: false,
+  size: 41,
+  modifiedAtMs: fileMtimeMs,
+  createdAtMs: 0,
+  childCount: null,
+};
 const picPng: FsEntry = {
   name: "pic.png",
   path: rootPath + "\\src\\pic.png",
@@ -151,6 +161,7 @@ function mockFs() {
       if (dir === srcDir.path)
         return Promise.resolve([
           mainTs,
+          programCs,
           picPng,
           docPdf,
           ...(createdFolder ? [createdFolder] : []),
@@ -184,10 +195,11 @@ function mockFs() {
       return Promise.resolve(new Uint8Array([37, 80, 68, 70, 45, 49]).buffer);
     }
     if (cmd === "session_fs_read") {
+      const path = (args as { path?: string }).path;
       return Promise.resolve({
-        content: "hello",
-        validUtf8: true,
-        byteSize: 5,
+        content: path === programCs.path ? "// 中文注释" : "hello",
+        encoding: path === programCs.path ? "gbk" : "utf-8",
+        byteSize: path === programCs.path ? 12 : 5,
       });
     }
     if (cmd === "session_fs_rename")
@@ -820,6 +832,29 @@ describe("ResourceView 文件树", () => {
       workspace: rootPath,
       path: aTxt.path,
     });
+    wrapper.unmount();
+  });
+
+  it("单击 GBK C# 文件行：正常打开且保持可编辑", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const row = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((item) => item.text().includes("Program.cs"));
+    expect(row).toBeTruthy();
+
+    await row!.trigger("click");
+    await flushPromises();
+
+    expect(store.toast).not.toContain("该文件不是文本文件");
+    const tab = tabs.find(
+      (item): item is FileEditorTab =>
+        item.kind === TabKind.File && item.path === programCs.path,
+    );
+    expect(tab?.readOnly).toBe(false);
+    expect(tab?.encoding).toBe("gbk");
+    expect(tab?.editorState?.doc.toString()).toBe("// 中文注释");
     wrapper.unmount();
   });
 

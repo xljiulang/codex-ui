@@ -707,13 +707,137 @@ const MAX_EDIT_BYTES: u64 = 5 * 1024 * 1024;
 #[serde(rename_all = "camelCase")]
 pub struct TextFileContent {
     pub content: String,
-    /// 内容是否为合法 UTF-8；false 表示仅 lossy 展示，应只读
-    pub valid_utf8: bool,
+    pub encoding: TextFileEncoding,
     pub byte_size: u64,
 }
 
+/// 文本编辑器支持的原编码；unknown 表示仅能以 lossy 文本只读展示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextFileEncoding {
+    #[serde(rename = "utf-8")]
+    Utf8,
+    #[serde(rename = "utf-16le")]
+    Utf16Le,
+    #[serde(rename = "utf-16be")]
+    Utf16Be,
+    #[serde(rename = "gbk")]
+    Gbk,
+    #[serde(rename = "gb18030")]
+    Gb18030,
+    #[serde(rename = "big5")]
+    Big5,
+    #[serde(rename = "shift_jis")]
+    ShiftJis,
+    #[serde(rename = "euc-kr")]
+    EucKr,
+    #[serde(rename = "windows-1252")]
+    Windows1252,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+fn encoding_from_detector(encoding: &'static encoding_rs::Encoding) -> Option<TextFileEncoding> {
+    if encoding == encoding_rs::UTF_8 {
+        Some(TextFileEncoding::Utf8)
+    } else if encoding == encoding_rs::UTF_16LE {
+        Some(TextFileEncoding::Utf16Le)
+    } else if encoding == encoding_rs::UTF_16BE {
+        Some(TextFileEncoding::Utf16Be)
+    } else if encoding == encoding_rs::GBK {
+        Some(TextFileEncoding::Gbk)
+    } else if encoding == encoding_rs::GB18030 {
+        Some(TextFileEncoding::Gb18030)
+    } else if encoding == encoding_rs::BIG5 {
+        Some(TextFileEncoding::Big5)
+    } else if encoding == encoding_rs::SHIFT_JIS {
+        Some(TextFileEncoding::ShiftJis)
+    } else if encoding == encoding_rs::EUC_KR {
+        Some(TextFileEncoding::EucKr)
+    } else if encoding == encoding_rs::WINDOWS_1252 {
+        Some(TextFileEncoding::Windows1252)
+    } else {
+        None
+    }
+}
+
+fn encoding_rs_for(encoding: TextFileEncoding) -> Option<&'static encoding_rs::Encoding> {
+    match encoding {
+        TextFileEncoding::Utf8 => Some(encoding_rs::UTF_8),
+        TextFileEncoding::Utf16Le => Some(encoding_rs::UTF_16LE),
+        TextFileEncoding::Utf16Be => Some(encoding_rs::UTF_16BE),
+        TextFileEncoding::Gbk => Some(encoding_rs::GBK),
+        TextFileEncoding::Gb18030 => Some(encoding_rs::GB18030),
+        TextFileEncoding::Big5 => Some(encoding_rs::BIG5),
+        TextFileEncoding::ShiftJis => Some(encoding_rs::SHIFT_JIS),
+        TextFileEncoding::EucKr => Some(encoding_rs::EUC_KR),
+        TextFileEncoding::Windows1252 => Some(encoding_rs::WINDOWS_1252),
+        TextFileEncoding::Unknown => None,
+    }
+}
+
+fn strict_decode(data: &[u8], encoding: TextFileEncoding) -> Option<String> {
+    if encoding == TextFileEncoding::Utf8 {
+        return std::str::from_utf8(data).ok().map(str::to_owned);
+    }
+    encoding_rs_for(encoding)?
+        .decode_without_bom_handling_and_without_replacement(data)
+        .map(|text| text.into_owned())
+}
+
+fn has_unexpected_controls(text: &str) -> bool {
+    text.chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\t' | '\n' | '\u{000c}' | '\r' | '\u{001b}'))
+}
+
+fn strict_sample_decode(
+    data: &[u8],
+    encoding: TextFileEncoding,
+    truncated: bool,
+) -> Option<String> {
+    let max_trim = if truncated { 3.min(data.len()) } else { 0 };
+    for trim in 0..=max_trim {
+        let candidate = &data[..data.len() - trim];
+        if let Some(text) = strict_decode(candidate, encoding) {
+            if !has_unexpected_controls(&text) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn detect_text_encoding(data: &[u8], truncated: bool) -> Option<TextFileEncoding> {
+    if data.is_empty() {
+        return Some(TextFileEncoding::Utf8);
+    }
+    if data.starts_with(&[0xff, 0xfe]) {
+        return strict_sample_decode(data, TextFileEncoding::Utf16Le, truncated)
+            .map(|_| TextFileEncoding::Utf16Le);
+    }
+    if data.starts_with(&[0xfe, 0xff]) {
+        return strict_sample_decode(data, TextFileEncoding::Utf16Be, truncated)
+            .map(|_| TextFileEncoding::Utf16Be);
+    }
+    if data.contains(&0) {
+        return None;
+    }
+    match std::str::from_utf8(data) {
+        Ok(text) if !has_unexpected_controls(text) => return Some(TextFileEncoding::Utf8),
+        Ok(_) => return None,
+        Err(e) if truncated && e.error_len().is_none() => {
+            return Some(TextFileEncoding::Utf8);
+        }
+        Err(_) => {}
+    }
+
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Allow);
+    detector.feed(data, !truncated);
+    let encoding = encoding_from_detector(detector.guess(None, chardetng::Utf8Detection::Allow))?;
+    strict_sample_decode(data, encoding, truncated).map(|_| encoding)
+}
+
 /// 单文件内容读取（文本编辑器用）：路径包含校验、仅文件、大小上限、
-/// UTF-8 合法性标记（非法编码以 lossy 展示，由前端置为只读）
+/// 编码自动识别（无法识别的非法编码以 lossy 展示，由前端置为只读）
 fn read_impl(root: &Path, path: &Path) -> Result<TextFileContent, String> {
     let target = ensure_inside(root, path)?;
     let meta = std::fs::metadata(&target)
@@ -726,13 +850,18 @@ fn read_impl(root: &Path, path: &Path) -> Result<TextFileContent, String> {
     }
     let bytes =
         std::fs::read(&target).map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
-    let (content, valid_utf8) = match String::from_utf8(bytes) {
-        Ok(s) => (s, true),
-        Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), false),
-    };
+    let sample_end = bytes.len().min(TEXT_PROBE_BYTES);
+    let detected = detect_text_encoding(&bytes[..sample_end], bytes.len() > sample_end)
+        .and_then(|encoding| strict_decode(&bytes, encoding).map(|text| (text, encoding)));
+    let (content, encoding) = detected.unwrap_or_else(|| {
+        (
+            String::from_utf8_lossy(&bytes).into_owned(),
+            TextFileEncoding::Unknown,
+        )
+    });
     Ok(TextFileContent {
         content,
-        valid_utf8,
+        encoding,
         byte_size: meta.len(),
     })
 }
@@ -759,23 +888,60 @@ pub async fn session_fs_read(workspace: String, path: String) -> Result<TextFile
     .await
 }
 
+fn encode_text(content: &str, encoding: TextFileEncoding) -> Result<Vec<u8>, String> {
+    match encoding {
+        TextFileEncoding::Utf8 => Ok(content.as_bytes().to_vec()),
+        TextFileEncoding::Utf16Le | TextFileEncoding::Utf16Be => {
+            let little_endian = encoding == TextFileEncoding::Utf16Le;
+            let mut bytes = Vec::with_capacity(content.len() * 2);
+            for unit in content.encode_utf16() {
+                let pair = if little_endian {
+                    unit.to_le_bytes()
+                } else {
+                    unit.to_be_bytes()
+                };
+                bytes.extend_from_slice(&pair);
+            }
+            Ok(bytes)
+        }
+        TextFileEncoding::Unknown => Err("文件编码未知，已拒绝保存".into()),
+        _ => {
+            let encoder =
+                encoding_rs_for(encoding).ok_or_else(|| "不支持的文件编码".to_string())?;
+            let (bytes, _, had_errors) = encoder.encode(content);
+            if had_errors {
+                return Err(format!(
+                    "内容包含 {} 不支持的字符，已拒绝保存",
+                    encoder.name()
+                ));
+            }
+            Ok(bytes.into_owned())
+        }
+    }
+}
+
 /// 单文件内容写入（文本编辑器用）：路径包含校验、仅文件、大小上限、
-/// NUL 检测，UTF-8 直写；返回写入后的文件条目
-fn write_impl(root: &Path, path: &Path, content: &str) -> Result<FsEntry, String> {
+/// 按原编码编码并拒绝 NUL；返回写入后的文件条目
+fn write_impl(
+    root: &Path,
+    path: &Path,
+    content: &str,
+    encoding: TextFileEncoding,
+) -> Result<FsEntry, String> {
     let target = ensure_inside(root, path)?;
     let meta = std::fs::metadata(&target)
         .map_err(|e| format!("无法写入文件 {}: {e}", clean_path(&target)))?;
     if !meta.is_file() {
         return Err(format!("不是文件: {}", clean_path(&target)));
     }
-    let bytes = content.as_bytes();
+    if content.contains('\0') {
+        return Err("内容包含二进制数据，已拒绝保存".into());
+    }
+    let bytes = encode_text(content, encoding)?;
     if bytes.len() as u64 > MAX_EDIT_BYTES {
         return Err("文件过大，暂不支持保存".into());
     }
-    if bytes.contains(&0) {
-        return Err("内容包含二进制数据，已拒绝保存".into());
-    }
-    std::fs::write(&target, bytes)
+    std::fs::write(&target, &bytes)
         .map_err(|e| format!("写入文件失败 {}: {e}", clean_path(&target)))?;
     entry_from_path(root, &target)
 }
@@ -785,10 +951,11 @@ pub async fn session_fs_write(
     workspace: String,
     path: String,
     content: String,
+    encoding: TextFileEncoding,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
         let root_p = resolve_workspace_dir(&workspace)?;
-        write_impl(&root_p, Path::new(&path), &content)
+        write_impl(&root_p, Path::new(&path), &content, encoding)
     })
     .await
 }
@@ -897,20 +1064,10 @@ pub async fn session_fs_create_dir(workspace: String, dir: String) -> Result<FsE
 /// 文本探测采样字节数（与 git 二进制判定窗口一致，覆盖常见文件头）
 const TEXT_PROBE_BYTES: usize = 8000;
 
-/// 内容级文本判定：前 8000 字节内出现 NUL → 二进制；无 NUL 且为空或
-/// 合法 UTF-8（仅采样末尾多字节序列被截断视为合法）→ 文本。
-pub(crate) fn looks_text(data: &[u8]) -> bool {
-    if data.contains(&0) {
-        return false;
-    }
-    if data.is_empty() {
-        return true;
-    }
-    match std::str::from_utf8(data) {
-        Ok(_) => true,
-        // error_len() == None 表示仅末尾存在未完成的多字节序列（采样截断），仍视为文本
-        Err(e) => e.error_len().is_none(),
-    }
+/// 内容级文本判定：BOM / UTF-8 优先，其余交给统计编码探测并严格解码；
+/// 二进制控制字符、NUL（UTF-16 合法 BOM 除外）或未知编码均视为非文本。
+pub(crate) fn looks_text(data: &[u8], truncated: bool) -> bool {
+    detect_text_encoding(data, truncated).is_some()
 }
 
 /// 打开前探测文件内容是否为文本：路径包含校验、仅文件、采样前 8000 字节
@@ -934,7 +1091,7 @@ fn probe_text_impl(root: &Path, path: &Path) -> Result<bool, String> {
         }
         n += read;
     }
-    Ok(looks_text(&buf[..n]))
+    Ok(looks_text(&buf[..n], meta.len() > TEXT_PROBE_BYTES as u64))
 }
 
 #[tauri::command]
@@ -1709,11 +1866,11 @@ mod tests {
         // 正常读取：内容原样返回 + UTF-8 标记与字节数
         let c = read_impl(&root, &root.join("a.txt")).unwrap();
         assert_eq!(c.content, "a");
-        assert!(c.valid_utf8);
+        assert_eq!(c.encoding, TextFileEncoding::Utf8);
         assert_eq!(c.byte_size, 1);
         let c = read_impl(&root, &root.join("src").join("main.ts")).unwrap();
         assert_eq!(c.content, "x");
-        assert!(c.valid_utf8);
+        assert_eq!(c.encoding, TextFileEncoding::Utf8);
         // 目录拒绝
         assert!(read_impl(&root, &root.join("src")).is_err());
         // 越界拒绝（ensure_inside 先行拦截）
@@ -1729,35 +1886,176 @@ mod tests {
     #[test]
     fn read_invalid_utf8_marks_readonly() {
         let (_tmp, root) = tree();
-        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8]).unwrap();
+        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8, 0x00u8]).unwrap();
         let c = read_impl(&root, &root.join("bad.dat")).unwrap();
-        assert!(!c.valid_utf8);
-        assert_eq!(c.byte_size, 2);
+        assert_eq!(c.encoding, TextFileEncoding::Unknown);
+        assert_eq!(c.byte_size, 3);
     }
 
     #[test]
     fn write_file_roundtrip_with_guards() {
         let (tmp, root) = tree();
         // 正常写入：UTF-8 多字节 + 返回刷新后的条目
-        let e = write_impl(&root, &root.join("a.txt"), "你好，Codex！\nline2").unwrap();
+        let e = write_impl(
+            &root,
+            &root.join("a.txt"),
+            "你好，Codex！\nline2",
+            TextFileEncoding::Utf8,
+        )
+        .unwrap();
         assert_eq!(e.name, "a.txt");
         let c = read_impl(&root, &root.join("a.txt")).unwrap();
         assert_eq!(c.content, "你好，Codex！\nline2");
-        assert!(c.valid_utf8);
+        assert_eq!(c.encoding, TextFileEncoding::Utf8);
         // 目录拒绝
-        assert!(write_impl(&root, &root.join("src"), "x").is_err());
+        assert!(write_impl(&root, &root.join("src"), "x", TextFileEncoding::Utf8).is_err());
         // 越界拒绝
         let outside = tmp.path().parent().unwrap().join("outside-write.txt");
         std::fs::write(&outside, "x").unwrap();
-        assert!(write_impl(&root, &outside, "y").is_err());
+        assert!(write_impl(&root, &outside, "y", TextFileEncoding::Utf8).is_err());
         let _ = std::fs::remove_file(&outside);
         // 不存在的文件拒绝（ensure_inside canonicalize 失败）
-        assert!(write_impl(&root, &root.join("missing.txt"), "y").is_err());
+        assert!(write_impl(
+            &root,
+            &root.join("missing.txt"),
+            "y",
+            TextFileEncoding::Utf8
+        )
+        .is_err());
         // 含 NUL 拒绝
-        assert!(write_impl(&root, &root.join("a.txt"), "a\u{0}b").is_err());
+        assert!(write_impl(
+            &root,
+            &root.join("a.txt"),
+            "a\u{0}b",
+            TextFileEncoding::Utf8
+        )
+        .is_err());
         // 超过 5 MiB 拒绝
         let big = "x".repeat((5 * 1024 * 1024) + 1);
-        assert!(write_impl(&root, &root.join("a.txt"), &big).is_err());
+        assert!(write_impl(&root, &root.join("a.txt"), &big, TextFileEncoding::Utf8).is_err());
+    }
+
+    #[test]
+    fn write_gbk_file_preserves_encoding() {
+        let (_tmp, root) = tree();
+        std::fs::write(
+            root.join("Program.cs"),
+            [
+                0x2f, 0x2f, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0xd7, 0xa2, 0xca, 0xcd,
+            ],
+        )
+        .unwrap();
+
+        write_impl(
+            &root,
+            &root.join("Program.cs"),
+            "更新",
+            TextFileEncoding::Gbk,
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(root.join("Program.cs")).unwrap(),
+            [0xb8, 0xfc, 0xd0, 0xc2]
+        );
+    }
+
+    #[test]
+    fn write_common_encodings_round_trips() {
+        let (_tmp, root) = tree();
+        let cases = [
+            ("gbk.txt", TextFileEncoding::Gbk, "// 中文注释\r\n", "gbk"),
+            (
+                "big5.txt",
+                TextFileEncoding::Big5,
+                "// 繁體中文測試，這是一段程式碼註解。\r\n",
+                "big5",
+            ),
+            (
+                "shift-jis.txt",
+                TextFileEncoding::ShiftJis,
+                "// 日本語のコメントです。これはテストコードです。\r\n",
+                "shift_jis",
+            ),
+            (
+                "euc-kr.txt",
+                TextFileEncoding::EucKr,
+                "// 한국어 주석입니다. 이것은 테스트 코드입니다.\r\n",
+                "euc-kr",
+            ),
+            (
+                "windows-1252.txt",
+                TextFileEncoding::Windows1252,
+                "// café résumé déjà vu — naïve façade\r\n",
+                "windows-1252",
+            ),
+        ];
+
+        for (name, encoding, text, expected_encoding) in cases {
+            let content = text.repeat(20);
+            std::fs::write(root.join(name), b"old").unwrap();
+            write_impl(&root, &root.join(name), &content, encoding).unwrap();
+
+            let saved = read_impl(&root, &root.join(name)).unwrap();
+            assert_eq!(saved.content, content, "{name} content");
+            let json = serde_json::to_value(saved).unwrap();
+            assert_eq!(json["encoding"], expected_encoding, "{name} encoding");
+        }
+    }
+
+    #[test]
+    fn write_utf16_preserves_bom_and_endianness() {
+        let (_tmp, root) = tree();
+        let content = "\u{feff}// 中文注释\r\n更新";
+        for (name, encoding, bom, expected_encoding) in [
+            (
+                "little.cs",
+                TextFileEncoding::Utf16Le,
+                [0xff, 0xfe],
+                "utf-16le",
+            ),
+            (
+                "big.cs",
+                TextFileEncoding::Utf16Be,
+                [0xfe, 0xff],
+                "utf-16be",
+            ),
+        ] {
+            std::fs::write(root.join(name), b"old").unwrap();
+            write_impl(&root, &root.join(name), content, encoding).unwrap();
+
+            let bytes = std::fs::read(root.join(name)).unwrap();
+            assert_eq!(&bytes[..2], &bom);
+            let saved = read_impl(&root, &root.join(name)).unwrap();
+            assert_eq!(saved.content, content);
+            let json = serde_json::to_value(saved).unwrap();
+            assert_eq!(json["encoding"], expected_encoding);
+        }
+    }
+
+    #[test]
+    fn write_rejects_unknown_and_unrepresentable_text() {
+        let (_tmp, root) = tree();
+        std::fs::write(root.join("a.txt"), "keep").unwrap();
+
+        let err = write_impl(
+            &root,
+            &root.join("a.txt"),
+            "replace",
+            TextFileEncoding::Unknown,
+        )
+        .unwrap_err();
+        assert!(err.contains("未知"));
+
+        let err = write_impl(
+            &root,
+            &root.join("a.txt"),
+            "emoji 🙂",
+            TextFileEncoding::Gbk,
+        )
+        .unwrap_err();
+        assert!(err.contains("不支持"));
+        assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"keep");
     }
 
     #[test]
@@ -1778,7 +2076,7 @@ mod tests {
         std::fs::write(root.join("bin.dat"), [0u8; 100]).unwrap();
         assert!(!probe_text_impl(&root, &root.join("bin.dat")).unwrap());
         // 无 NUL 但非法 UTF-8
-        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8]).unwrap();
+        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8, 0x00u8]).unwrap();
         assert!(!probe_text_impl(&root, &root.join("bad.dat")).unwrap());
         // NUL 位于采样窗口之外时不误判（记录窗口限制）
         let mut late = vec![b'a'; 8100];
@@ -1792,6 +2090,217 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         assert!(probe_text_impl(&root, &outside).is_err());
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn probe_text_accepts_gbk_sample_cut_mid_character() {
+        let (_tmp, root) = tree();
+        let body = [
+            0x2f, 0x2f, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0xd7, 0xa2, 0xca, 0xcd, 0x0d, 0x0a,
+        ]
+        .repeat(700);
+        std::fs::write(root.join("long.cs"), body).unwrap();
+
+        assert!(probe_text_impl(&root, &root.join("long.cs")).unwrap());
+    }
+
+    #[test]
+    fn probe_text_rejects_control_heavy_binary_without_nul() {
+        let (_tmp, root) = tree();
+        let mut bytes = vec![b'a'; 200];
+        bytes[50] = 0x01;
+        bytes[100] = 0x02;
+        std::fs::write(root.join("control.dat"), bytes).unwrap();
+
+        assert!(!probe_text_impl(&root, &root.join("control.dat")).unwrap());
+    }
+
+    #[test]
+    fn probe_text_accepts_gbk_csharp_source() {
+        let (_tmp, root) = tree();
+        let bytes = [
+            0x75, 0x73, 0x69, 0x6e, 0x67, 0x20, 0x58, 0x3b, 0x0d, 0x0a, 0x2f, 0x2f, 0x20, 0xd6,
+            0xd0, 0xce, 0xc4, 0xd7, 0xa2, 0xca, 0xcd, 0x0d, 0x0a, 0x63, 0x6c, 0x61, 0x73, 0x73,
+            0x20, 0x50, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x20, 0x7b, 0x7d, 0x0d, 0x0a,
+        ];
+        std::fs::write(root.join("Program.cs"), bytes).unwrap();
+
+        assert!(probe_text_impl(&root, &root.join("Program.cs")).unwrap());
+    }
+
+    #[test]
+    fn read_gbk_csharp_source_decodes_chinese() {
+        let (_tmp, root) = tree();
+        let bytes = [
+            0x75, 0x73, 0x69, 0x6e, 0x67, 0x20, 0x58, 0x3b, 0x0d, 0x0a, 0x2f, 0x2f, 0x20, 0xd6,
+            0xd0, 0xce, 0xc4, 0xd7, 0xa2, 0xca, 0xcd, 0x0d, 0x0a, 0x63, 0x6c, 0x61, 0x73, 0x73,
+            0x20, 0x50, 0x72, 0x6f, 0x67, 0x72, 0x61, 0x6d, 0x20, 0x7b, 0x7d, 0x0d, 0x0a,
+        ];
+        std::fs::write(root.join("Program.cs"), bytes).unwrap();
+
+        let content = read_impl(&root, &root.join("Program.cs")).unwrap();
+
+        assert_eq!(
+            content.content,
+            "using X;\r\n// 中文注释\r\nclass Program {}\r\n"
+        );
+    }
+
+    #[test]
+    fn read_reports_gbk_encoding() {
+        let (_tmp, root) = tree();
+        std::fs::write(
+            root.join("Program.cs"),
+            [
+                0x2f, 0x2f, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0xd7, 0xa2, 0xca, 0xcd, 0x0d, 0x0a,
+            ],
+        )
+        .unwrap();
+
+        let content = read_impl(&root, &root.join("Program.cs")).unwrap();
+        let json = serde_json::to_value(content).unwrap();
+
+        assert_eq!(json["encoding"], "gbk");
+    }
+
+    #[test]
+    fn text_encoding_deserializes_write_values() {
+        for value in [
+            ("utf-8", TextFileEncoding::Utf8),
+            ("utf-16le", TextFileEncoding::Utf16Le),
+            ("utf-16be", TextFileEncoding::Utf16Be),
+            ("gbk", TextFileEncoding::Gbk),
+            ("gb18030", TextFileEncoding::Gb18030),
+            ("big5", TextFileEncoding::Big5),
+            ("shift_jis", TextFileEncoding::ShiftJis),
+            ("euc-kr", TextFileEncoding::EucKr),
+            ("windows-1252", TextFileEncoding::Windows1252),
+            ("unknown", TextFileEncoding::Unknown),
+        ] {
+            let decoded: TextFileEncoding =
+                serde_json::from_str(&format!("\"{}\"", value.0)).unwrap();
+            assert_eq!(decoded, value.1);
+        }
+    }
+
+    #[test]
+    fn probe_and_read_common_encodings() {
+        let cases = [
+            (
+                "utf-16le.txt",
+                vec![0xff, 0xfe],
+                vec![
+                    0x2f, 0x00, 0x2f, 0x00, 0x20, 0x00, 0x2d, 0x4e, 0x87, 0x65, 0xe8, 0x6c, 0xca,
+                    0x91, 0x0d, 0x00, 0x0a, 0x00,
+                ],
+                "// 中文注释\r\n",
+                "utf-16le",
+            ),
+            (
+                "utf-16be.txt",
+                vec![0xfe, 0xff],
+                vec![
+                    0x00, 0x2f, 0x00, 0x2f, 0x00, 0x20, 0x4e, 0x2d, 0x65, 0x87, 0x6c, 0xe8, 0x91,
+                    0xca, 0x00, 0x0d, 0x00, 0x0a,
+                ],
+                "// 中文注释\r\n",
+                "utf-16be",
+            ),
+            (
+                "big5.txt",
+                vec![],
+                vec![
+                    0x2f, 0x2f, 0x20, 0xc1, 0x63, 0xc5, 0xe9, 0xa4, 0xa4, 0xa4, 0xe5, 0xb4, 0xfa,
+                    0xb8, 0xd5, 0xa1, 0x41, 0xb3, 0x6f, 0xac, 0x4f, 0xa4, 0x40, 0xac, 0x71, 0xb5,
+                    0x7b, 0xa6, 0xa1, 0xbd, 0x58, 0xb5, 0xf9, 0xb8, 0xd1, 0xa1, 0x43, 0x0d, 0x0a,
+                ],
+                "// 繁體中文測試，這是一段程式碼註解。\r\n",
+                "big5",
+            ),
+            (
+                "shift-jis.txt",
+                vec![],
+                vec![
+                    0x2f, 0x2f, 0x20, 0x93, 0xfa, 0x96, 0x7b, 0x8c, 0xea, 0x82, 0xcc, 0x83, 0x52,
+                    0x83, 0x81, 0x83, 0x93, 0x83, 0x67, 0x82, 0xc5, 0x82, 0xb7, 0x81, 0x42, 0x82,
+                    0xb1, 0x82, 0xea, 0x82, 0xcd, 0x83, 0x65, 0x83, 0x58, 0x83, 0x67, 0x83, 0x52,
+                    0x81, 0x5b, 0x83, 0x68, 0x82, 0xc5, 0x82, 0xb7, 0x81, 0x42, 0x0d, 0x0a,
+                ],
+                "// 日本語のコメントです。これはテストコードです。\r\n",
+                "shift_jis",
+            ),
+            (
+                "euc-kr.txt",
+                vec![],
+                vec![
+                    0x2f, 0x2f, 0x20, 0xc7, 0xd1, 0xb1, 0xb9, 0xbe, 0xee, 0x20, 0xc1, 0xd6, 0xbc,
+                    0xae, 0xc0, 0xd4, 0xb4, 0xcf, 0xb4, 0xd9, 0x2e, 0x20, 0xc0, 0xcc, 0xb0, 0xcd,
+                    0xc0, 0xba, 0x20, 0xc5, 0xd7, 0xbd, 0xba, 0xc6, 0xae, 0x20, 0xc4, 0xda, 0xb5,
+                    0xe5, 0xc0, 0xd4, 0xb4, 0xcf, 0xb4, 0xd9, 0x2e, 0x0d, 0x0a,
+                ],
+                "// 한국어 주석입니다. 이것은 테스트 코드입니다.\r\n",
+                "euc-kr",
+            ),
+            (
+                "windows-1252.txt",
+                vec![],
+                vec![
+                    0x2f, 0x2f, 0x20, 0x63, 0x61, 0x66, 0xe9, 0x20, 0x72, 0xe9, 0x73, 0x75, 0x6d,
+                    0xe9, 0x20, 0x64, 0xe9, 0x6a, 0xe0, 0x20, 0x76, 0x75, 0x20, 0x97, 0x20, 0x6e,
+                    0x61, 0xef, 0x76, 0x65, 0x20, 0x66, 0x61, 0xe7, 0x61, 0x64, 0x65, 0x0d, 0x0a,
+                ],
+                "// café résumé déjà vu — naïve façade\r\n",
+                "windows-1252",
+            ),
+        ];
+
+        let (_tmp, case_root) = tree();
+        for (index, (name, prefix, body, text, encoding)) in cases.into_iter().enumerate() {
+            let root_name = format!("case-{index}");
+            let expected = if prefix.is_empty() {
+                text.repeat(20)
+            } else {
+                format!("\u{feff}{}", text.repeat(20))
+            };
+            let bytes = prefix
+                .into_iter()
+                .chain(body.repeat(20))
+                .collect::<Vec<_>>();
+            std::fs::write(case_root.join(name), bytes).unwrap();
+            assert!(
+                probe_text_impl(&case_root, &case_root.join(name)).unwrap(),
+                "{root_name} probe"
+            );
+            let content = read_impl(&case_root, &case_root.join(name)).unwrap();
+            assert_eq!(content.content, expected, "{root_name} content");
+            let json = serde_json::to_value(content).unwrap();
+            assert_eq!(json["encoding"], encoding, "{root_name} encoding");
+        }
+    }
+
+    #[test]
+    #[ignore = "手工回归：设置 CODEX_UI_ENCODING_SAMPLE 指向真实编码样本"]
+    fn manual_encoding_sample_file() {
+        let path = PathBuf::from(
+            std::env::var_os("CODEX_UI_ENCODING_SAMPLE").expect("缺少 CODEX_UI_ENCODING_SAMPLE"),
+        );
+        let root = path.parent().expect("样本文件必须位于目录内");
+
+        let content = read_impl(root, &path).unwrap();
+
+        assert_eq!(content.encoding, TextFileEncoding::Gbk);
+        assert!(!content.content.contains('\u{fffd}'));
+        assert!(content
+            .content
+            .chars()
+            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)));
+
+        let original = std::fs::read(&path).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let copy = temp.path().join("Program.cs");
+        std::fs::write(&copy, &original).unwrap();
+        write_impl(temp.path(), &copy, &content.content, content.encoding).unwrap();
+        assert_eq!(std::fs::read(copy).unwrap(), original);
     }
 
     #[test]

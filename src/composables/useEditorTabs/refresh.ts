@@ -5,7 +5,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { markRaw, watch } from "vue";
 import { activeTabId, tabs, type Tab } from "../useTabs";
 import { assetUrl } from "../../lib/asset";
-import { detectEol, normalizeForEditor, stripBom } from "../../lib/editorFile";
+import {
+  detectEol,
+  normalizeForEditor,
+  stripBom,
+  type TextFileContent,
+} from "../../lib/editorFile";
 import { formatTimeHMS, relPathOf } from "../../lib/format";
 import { normalizeFsPath } from "../../lib/path";
 import { TabKind } from "../../lib/tabs";
@@ -16,13 +21,6 @@ import type { FileEditorTab, PreviewEditorTab } from "./types";
 export interface FsChangedPayload {
   root: string;
   paths: string[];
-}
-
-/** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
-interface TextFileContent {
-  content: string;
-  validUtf8: boolean;
-  byteSize: number;
 }
 
 /** 编辑区交互空闲阈值（鼠标/键盘最后一次交互后等待时长） */
@@ -179,14 +177,21 @@ async function refreshFileTab(tab: FileEditorTab): Promise<void> {
     const { text, hadBom } = stripBom(info.content);
     const eol = detectEol(text);
     const doc = normalizeForEditor(text, eol);
-    if (tab.editorState && doc === tab.editorState.doc.toString()) return;
-    const state = await buildFileEditorState(
-      tab,
-      doc,
-      info.validUtf8,
-      tab.cursor,
-    );
-    tab.readOnly = !info.validUtf8;
+    const readOnly = info.encoding === "unknown";
+    if (
+      tab.editorState &&
+      doc === tab.editorState.doc.toString() &&
+      readOnly === tab.readOnly
+    ) {
+      if (tab.encoding !== info.encoding) {
+        tab.encoding = info.encoding;
+        tab.status = `已从磁盘刷新 ${formatTimeHMS(Date.now())}`;
+      }
+      return;
+    }
+    const state = await buildFileEditorState(tab, doc, readOnly, tab.cursor);
+    tab.readOnly = readOnly;
+    tab.encoding = info.encoding;
     tab.eol = eol;
     tab.hadBom = hadBom;
     tab.byteSize = info.byteSize;

@@ -131,7 +131,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }
@@ -163,7 +163,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }
@@ -257,7 +257,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }
@@ -292,7 +292,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }
@@ -341,7 +341,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }
@@ -371,7 +371,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       if (cmd === "session_fs_read") {
         return Promise.resolve({
           content: "hello",
-          validUtf8: true,
+          encoding: "utf-8",
           byteSize: 5,
         });
       }

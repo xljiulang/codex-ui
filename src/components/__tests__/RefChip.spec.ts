@@ -178,7 +178,11 @@ describe("RefChip 自定义悬浮卡片", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hi", validUtf8: true, byteSize: 2 });
+        return Promise.resolve({
+          content: "hi",
+          encoding: "utf-8",
+          byteSize: 2,
+        });
       }
       return Promise.resolve(undefined);
     });
